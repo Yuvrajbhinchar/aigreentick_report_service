@@ -77,7 +77,6 @@ public class Wallet {
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
-
     public enum WalletType {
         credit,
         debit
