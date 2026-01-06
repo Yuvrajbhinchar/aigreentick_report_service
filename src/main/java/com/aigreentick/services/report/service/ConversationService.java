@@ -1,23 +1,20 @@
 package com.aigreentick.services.report.service;
 
-import com.aigreentick.services.report.dto.ChatDto;
-import com.aigreentick.services.report.dto.ConversationDto;
 import com.aigreentick.services.report.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
+@RequiredArgsConstructor
 public class ConversationService {
 
     private final ConversationRepository repository;
 
-    public Page<ConversationDto> getInbox(
+    public Map<String, Object> getInbox(
             Integer userId,
             String search,
             String filter,
@@ -27,28 +24,39 @@ public class ConversationService {
 
         int offset = page * size;
 
-        Page<Object[]> contacts =
+        List<Map<String, Object>> contacts =
                 repository.fetchContacts(userId, search, filter, offset, size);
 
-        List<Integer> contactIds = contacts.getContent().stream()
-                .map(r -> ((Number) r[0]).intValue())
+        long total = repository.countContacts(userId);
+
+        List<Integer> contactIds = contacts.stream()
+                .map(r -> ((Number) r.get("id")).intValue())
                 .toList();
 
-        Map<Integer, ChatDto> lastChats =
+        Map<Integer, Map<String, Object>> lastChats =
                 repository.fetchLastChats(contactIds);
 
-        return contacts.map(r -> {
-            Integer contactId = ((Number) r[0]).intValue();
+        for (Map<String, Object> row : contacts) {
+            Integer contactId = ((Number) row.get("id")).intValue();
 
-            return new ConversationDto(
-                    contactId,
-                    (String) r[1],                          // name
-                    (String) r[2],                          // mobile
-                    ((Number) r[3]).longValue(),            // lastChatTime
-                    r[4] == null ? 0L : ((Number) r[4]).longValue(),
-                    lastChats.get(contactId)                // ✅ ChatDto
-            );
-        });
+            Object unread = row.get("unread_count");
+            long totalMsgCount =
+                    unread == null ? 0L : ((Number) unread).longValue();
+
+            row.put("last_chat", lastChats.get(contactId));
+            row.put("total_msg_count", totalMsgCount);
+        }
+
+        Map<String, Object> users = new LinkedHashMap<>();
+        users.put("current_page", page + 1);
+        users.put("data", contacts);
+        users.put("per_page", size);
+        users.put("total", total);
+        users.put("last_page", (int) Math.ceil((double) total / size));
+
+        return Map.of(
+                "users", users,
+                "channel", List.of()
+        );
     }
-
 }

@@ -100,109 +100,67 @@ public interface ContactMessageRepository extends JpaRepository<ContactMessage, 
             Pageable pageable
     );
 
-
     @Query(
             value = """
-        SELECT
-            cm.id AS id,
-            t.category AS category,
+SELECT
+    cm.id                         AS id,
+    c.text                        AS message,
+    c.type                        AS type,
+    COALESCE(c.status, r.status)  AS status,
+    c.send_from                   AS sendFrom,
+    COALESCE(c.send_to, r.mobile) AS sendTo,
+    cm.created_at                 AS createdAt,
 
-            c.reply_message_id AS replyMessageId,
-            c.message_id AS messageId,
-            c.reply_from AS replyFrom,
+    c.payload                     AS payload,
+    c.response                    AS response,
 
-            CASE
-                WHEN tc.type = 'CAROUSEL' THEN 'CAROUSEL'
-                ELSE 'STANDARD'
-            END AS templateType,
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'id', cbn.id,
+            'type', cbn.type,
+            'text', cbn.text,
+            'url', cbn.url
+        )
+    ) AS chatButtons
 
-            CASE
-                WHEN cm.chat_id IS NOT NULL THEN 'chat'
-                ELSE 'broadcast'
-            END AS chatType,
+FROM contacts_messages cm
 
-            IF(cm.chat_id IS NOT NULL, c.type, 'sent') AS type,
-            COALESCE(c.status, r.status, 'sent') AS status,
+LEFT JOIN chats c
+    ON c.id = cm.chat_id
 
-            CASE
-                WHEN tc.type = 'BODY' THEN CONVERT(tc.text USING utf8mb4)
-                ELSE COALESCE(CONVERT(c.text USING utf8mb4),
-                              CONVERT(tc.text USING utf8mb4))
-            END AS message,
+LEFT JOIN reports r
+    ON r.id = cm.report_id
 
-            COALESCE(c.payload, r.payload) AS payload,
-            COALESCE(c.response, r.response) AS response,
+LEFT JOIN chat_buttons cbn
+    ON cbn.chat_id = c.id
 
-            c.send_from AS sendFrom,
-            COALESCE(c.send_to, r.mobile) AS sendTo,
+WHERE cm.contact_id = :contactId
+  AND c.user_id = :userId
 
-            cm.created_at AS createdAt,
+AND (
+    :search IS NULL
+    OR c.text LIKE CONCAT('%', :search, '%')
+    OR c.send_from LIKE CONCAT('%', :search, '%')
+    OR c.send_to LIKE CONCAT('%', :search, '%')
+)
 
-            JSON_ARRAYAGG(
-                JSON_OBJECT(
-                    'type', cb.type,
-                    'number', cb.number,
-                    'text', cb.text,
-                    'url', cb.url
-                )
-            ) AS buttons,
+AND (
+    :fromDate IS NULL OR cm.created_at >= :fromDate
+)
+AND (
+    :toDate IS NULL OR cm.created_at <= :toDate
+)
 
-            JSON_ARRAYAGG(
-                JSON_OBJECT(
-                    'id', cbn.id,
-                    'type', cbn.type,
-                    'text', cbn.text,
-                    'url', cbn.url
-                )
-            ) AS chatButtons,
-
-            CASE
-                WHEN tc.type = 'CAROUSEL' THEN
-                    JSON_ARRAYAGG(
-                        JSON_OBJECT(
-                            'card_id', cards.id,
-                            'template_id', cards.template_id,
-                            'body', cards.body,
-                            'media_type', cards.media_type,
-                            'image_url', cards.image_url,
-                            'parameters', cards.parameters
-                        )
-                    )
-                ELSE NULL
-            END AS carouselCards
-
-        FROM contacts_messages cm
-        LEFT JOIN chats c ON c.id = cm.chat_id
-        LEFT JOIN chat_buttons cbn ON cbn.chat_id = c.id
-        LEFT JOIN reports r ON r.id = cm.report_id
-        LEFT JOIN broadcasts b ON b.id = r.broadcast_id
-        LEFT JOIN templates t ON t.id = b.template_id
-        LEFT JOIN template_components tc ON tc.template_id = t.id
-        LEFT JOIN template_component_buttons cb
-            ON cb.template_id = t.id AND cb.component_id = tc.id
-        LEFT JOIN template_carousel_cards cards
-            ON cards.template_id = t.id AND tc.type = 'CAROUSEL'
-
-        WHERE cm.user_id = :userId
-          AND cm.contact_id = :contactId
-
-        AND (:search IS NULL OR
-             c.text LIKE %:search% OR
-             c.send_from LIKE %:search% OR
-             c.send_to LIKE %:search%)
-
-        AND (:fromDate IS NULL OR cm.created_at >= :fromDate)
-        AND (:toDate IS NULL OR cm.created_at <= :toDate)
-
-        GROUP BY cm.id, c.id, r.id, t.id, tc.id
-        ORDER BY cm.created_at DESC
-        """,
+GROUP BY cm.id, c.id, r.id
+ORDER BY cm.created_at DESC
+""",
             countQuery = """
-        SELECT COUNT(*)
-        FROM contacts_messages
-        WHERE user_id = :userId
-          AND contact_id = :contactId
-        """,
+SELECT COUNT(*)
+FROM contacts_messages cm
+LEFT JOIN chats c ON c.id = cm.chat_id
+WHERE cm.contact_id = :contactId
+  AND c.user_id = :userId
+""",
             nativeQuery = true
     )
     Page<ChatMessageRowDTO> findConversation(
