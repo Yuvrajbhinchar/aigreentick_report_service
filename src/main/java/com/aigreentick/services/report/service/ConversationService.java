@@ -4,6 +4,7 @@ import com.aigreentick.services.report.dto.ChatDto;
 import com.aigreentick.services.report.dto.ConversationDto;
 import com.aigreentick.services.report.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 
@@ -11,6 +12,7 @@ import java.util.*;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ConversationService {
 
     private final ConversationRepository repository;

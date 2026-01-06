@@ -3,11 +3,13 @@ package com.aigreentick.services.report.controller;
 import com.aigreentick.services.report.dto.ConversationDto;
 import com.aigreentick.services.report.service.ConversationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/reports")
+@Slf4j
 @RequiredArgsConstructor
 public class ConversationController {
 
