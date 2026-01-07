@@ -26,3 +26,4 @@ public class ConversationController {
         return service.getInbox(userId, search, filter, page, size);
     }
 }
+
