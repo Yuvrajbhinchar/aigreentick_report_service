@@ -11,6 +11,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import java.util.List;
+import java.util.Map;
 
 
 @Service
@@ -55,22 +56,22 @@ public class ChatPaginationService {
 
         res.setPayload(parseJson(row.getPayload()));
         res.setResponse(parseJson(row.getResponse()));
-        res.setButtons(parseJsonArray(row.getButtons()));
-        res.setChatButtons(parseJsonArray(row.getChatButtons()));
-        res.setCarouselCards(parseJsonArray(row.getCarouselCards()));
+        res.setButtons(cleanArray(parseJsonArray(row.getButtons())));
+        res.setChatButtons(cleanArray(parseJsonArray(row.getChatButtons())));
+        res.setCarouselCards(cleanArray(parseJsonArray(row.getCarouselCards())));
 
         return res;
     }
 
     private Object parseJson(String json) {
         try {
-            return json == null ? null : objectMapper.readTree(json);
+            return json == null ? null : objectMapper.readValue(json, Object.class);
         } catch (Exception e) {
             return null;
         }
     }
 
-    private List<?> parseJsonArray(String json) {
+    private List<Map<String, Object>> parseJsonArray(String json) {
         try {
             return json == null
                     ? List.of()
@@ -79,5 +80,17 @@ public class ChatPaginationService {
             return List.of();
         }
     }
+
+    private List<?> cleanArray(List<Map<String, Object>> list) {
+        if (list == null) return List.of();
+
+        return list.stream()
+                .filter(map ->
+                        map.values().stream().anyMatch(v -> v != null)
+                )
+                .toList();
+    }
+
+
 }
 
