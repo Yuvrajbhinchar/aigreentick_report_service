@@ -6,5 +6,5 @@ public record ConversationDto(
         String mobile,
         Long lastChatTime,
         Long unreadCount,
-        ChatDto lastChat
+        ChatDTO lastChat
 ) {}

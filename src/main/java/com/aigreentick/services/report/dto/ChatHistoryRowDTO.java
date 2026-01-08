@@ -7,19 +7,16 @@ public interface ChatHistoryRowDTO {
     Long getId();
     Long getContactId();
 
-    // contact
     String getName();
     String getMobile();
     String getEmail();
     String getCountryId();
 
-    // chat
     String getChatText();
     String getChatType();
     String getChatTime();
     String getChatStatus();
 
-    // report
     Long getReportId();
     String getReportStatus();
 
