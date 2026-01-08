@@ -4,6 +4,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 
 @Data
 @AllArgsConstructor
@@ -11,13 +13,16 @@ import lombok.NoArgsConstructor;
 public class MessageHistoryResponse {
 
     private Long id;
-    private Long contact_id;
+    private Long contactId;
     private ContactDTO contact;
     private ChatDTO chat;
     private ReportDTO report;
-    private Long unread_count;
-    private Long last_chat_time;
-    private String created_at;
+    private Integer unreadCount;
+    private Long lastChatTime;
+    private LocalDateTime createdAt;
+
+
 }
+
 
 

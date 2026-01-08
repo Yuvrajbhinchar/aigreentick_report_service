@@ -12,5 +12,6 @@ public class ContactDTO {
     private String name;
     private String mobile;
     private String email;
-    private String country_id;
+    private String countryId;
 }
+
