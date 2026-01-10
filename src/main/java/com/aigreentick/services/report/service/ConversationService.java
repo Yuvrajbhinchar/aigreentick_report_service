@@ -24,18 +24,23 @@ public class ConversationService {
 
         int offset = page * size;
 
+        // Fetch contacts with last_chat_time and unread_count
         List<Map<String, Object>> contacts =
                 repository.fetchContacts(userId, search, filter, offset, size);
 
-        long total = repository.countContacts(userId);
+        // Get total count (with same filters for accurate pagination)
+        long total = repository.countContacts(userId, search, filter);
 
+        // Extract contact IDs
         List<Integer> contactIds = contacts.stream()
                 .map(r -> ((Number) r.get("id")).intValue())
                 .toList();
 
+        // Fetch last chats for all contacts
         Map<Integer, Map<String, Object>> lastChats =
                 repository.fetchLastChats(contactIds);
 
+        // Attach last_chat and total_msg_count to each contact
         for (Map<String, Object> row : contacts) {
             Integer contactId = ((Number) row.get("id")).intValue();
 
@@ -47,6 +52,7 @@ public class ConversationService {
             row.put("total_msg_count", totalMsgCount);
         }
 
+        // Build pagination metadata
         Map<String, Object> users = new LinkedHashMap<>();
         users.put("current_page", page + 1);
         users.put("data", contacts);

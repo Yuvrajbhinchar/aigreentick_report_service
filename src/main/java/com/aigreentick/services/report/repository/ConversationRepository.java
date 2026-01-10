@@ -6,7 +6,6 @@ import jakarta.persistence.Query;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDateTime;
 import java.util.*;
 
 @Repository
@@ -17,7 +16,7 @@ public class ConversationRepository {
     private EntityManager em;
 
     /* =========================
-       FETCH CONTACTS (FAST & SAFE)
+       FETCH CONTACTS (OPTIMIZED FOR SPEED)
        ========================= */
     public List<Map<String, Object>> fetchContacts(
             Integer userId,
@@ -43,41 +42,29 @@ public class ConversationRepository {
                 lm.last_chat_time,
                 ut.unread_count
             FROM chat_contacts cc
-
-            /* restrict contacts first */
-            JOIN (
-                SELECT id
-                FROM chat_contacts
-                WHERE user_id = :userId
-            ) uc ON uc.id = cc.id
-
-            /* last message per contact */
-            JOIN (
-                SELECT
-                    c.contact_id,
-                    MAX(c.created_at) AS last_chat_time
-                FROM chats c
-                JOIN chat_contacts cc2
-                    ON cc2.id = c.contact_id
-                   AND cc2.user_id = :userId
-                GROUP BY c.contact_id
-            ) lm ON lm.contact_id = cc.id
-
-            /* unread count */
+            
+            /* Last message time using CAST for performance */
             LEFT JOIN (
                 SELECT
-                    c.contact_id,
+                    contact_id,
+                    MAX(CAST(time AS UNSIGNED)) AS last_chat_time
+                FROM chats
+                GROUP BY contact_id
+            ) lm ON lm.contact_id = cc.id
+            
+            /* Unread count */
+            LEFT JOIN (
+                SELECT
+                    contact_id,
                     COUNT(*) AS unread_count
-                FROM chats c
-                JOIN chat_contacts cc3
-                    ON cc3.id = c.contact_id
-                   AND cc3.user_id = :userId
-                WHERE LOWER(TRIM(c.type)) = 'recieve'
-                  AND TRIM(c.status) = '0'
-                GROUP BY c.contact_id
+                FROM chats
+                WHERE LOWER(TRIM(type)) = 'recieve'
+                  AND TRIM(status) = '0'
+                GROUP BY contact_id
             ) ut ON ut.contact_id = cc.id
-
+            
             WHERE cc.user_id = :userId
+              AND lm.last_chat_time IS NOT NULL
         """);
 
         if (search != null && !search.isBlank()) {
@@ -89,25 +76,22 @@ public class ConversationRepository {
         }
 
         if ("active".equalsIgnoreCase(filter)) {
-            sql.append(" AND lm.last_chat_time >= :activeSince ");
+            // Calculate 24 hours ago timestamp
+            long activeSince = (System.currentTimeMillis() / 1000) - (24 * 60 * 60);
+            sql.append(" AND lm.last_chat_time >= ").append(activeSince).append(" ");
         }
 
         sql.append(" ORDER BY lm.last_chat_time DESC ");
+        sql.append(" LIMIT :limit OFFSET :offset ");
 
         Query query = em.createNativeQuery(sql.toString());
         query.setParameter("userId", userId);
+        query.setParameter("limit", limit);
+        query.setParameter("offset", offset);
 
         if (search != null && !search.isBlank()) {
             query.setParameter("search", "%" + search + "%");
         }
-
-        if ("active".equalsIgnoreCase(filter)) {
-            query.setParameter("activeSince", LocalDateTime.now().minusHours(24));
-        }
-
-        /* IMPORTANT: pagination ONLY here */
-        query.setFirstResult(offset);
-        query.setMaxResults(limit);
 
         @SuppressWarnings("unchecked")
         List<Object[]> rows = query.getResultList();
@@ -123,11 +107,11 @@ public class ConversationRepository {
             row.put("country_id", r[4]);
             row.put("email", r[5]);
             row.put("status", r[6]);
-            row.put("time", r[7]); // kept
+            row.put("time", r[7]);
             row.put("created_at", r[8] == null ? null : r[8].toString());
             row.put("updated_at", r[9] == null ? null : r[9].toString());
             row.put("deleted_at", r[10] == null ? null : r[10].toString());
-            row.put("last_chat_time", r[11] == null ? null : r[11].toString());
+            row.put("last_chat_time", r[11]);
             row.put("unread_count", r[12]);
             result.add(row);
         }
@@ -136,27 +120,59 @@ public class ConversationRepository {
     }
 
     /* =========================
-       COUNT CONTACTS (FAST)
+       COUNT CONTACTS (OPTIMIZED)
        ========================= */
-    public long countContacts(Integer userId) {
+    public long countContacts(Integer userId, String search, String filter) {
 
-        Query q = em.createNativeQuery("""
-            SELECT COUNT(*)
+        StringBuilder sql = new StringBuilder("""
+            SELECT COUNT(DISTINCT cc.id)
             FROM chat_contacts cc
-            WHERE cc.user_id = :userId
-              AND EXISTS (
-                  SELECT 1
-                  FROM chats c
-                  WHERE c.contact_id = cc.id
-              )
+            LEFT JOIN (
+                SELECT contact_id, MAX(CAST(time AS UNSIGNED)) AS last_chat_time
+                FROM chats
+                GROUP BY contact_id
+            ) lm ON lm.contact_id = cc.id
         """);
 
+        if ("unread".equalsIgnoreCase(filter)) {
+            sql.append("""
+                LEFT JOIN (
+                    SELECT contact_id, COUNT(*) AS unread_count
+                    FROM chats
+                    WHERE LOWER(TRIM(type)) = 'recieve'
+                      AND TRIM(status) = '0'
+                    GROUP BY contact_id
+                ) ut ON ut.contact_id = cc.id
+            """);
+        }
+
+        sql.append(" WHERE cc.user_id = :userId AND lm.last_chat_time IS NOT NULL ");
+
+        if (search != null && !search.isBlank()) {
+            sql.append(" AND (cc.name LIKE :search OR cc.mobile LIKE :search) ");
+        }
+
+        if ("unread".equalsIgnoreCase(filter)) {
+            sql.append(" AND ut.unread_count IS NOT NULL ");
+        }
+
+        if ("active".equalsIgnoreCase(filter)) {
+            long activeSince = (System.currentTimeMillis() / 1000) - (24 * 60 * 60);
+            sql.append(" AND lm.last_chat_time >= ").append(activeSince).append(" ");
+        }
+
+        Query q = em.createNativeQuery(sql.toString());
         q.setParameter("userId", userId);
+
+        if (search != null && !search.isBlank()) {
+            q.setParameter("search", "%" + search + "%");
+        }
+
         return ((Number) q.getSingleResult()).longValue();
     }
 
     /* =========================
-       LAST CHAT PER CONTACT
+       LAST CHAT PER CONTACT (OPTIMIZED)
        ========================= */
     public Map<Integer, Map<String, Object>> fetchLastChats(List<Integer> contactIds) {
 
@@ -188,13 +204,13 @@ public class ConversationRepository {
                    c1.deleted_at
             FROM chats c1
             JOIN (
-                SELECT contact_id, MAX(created_at) AS max_time
+                SELECT contact_id, MAX(CAST(time AS UNSIGNED)) AS max_time
                 FROM chats
                 WHERE contact_id IN :ids
                 GROUP BY contact_id
             ) c2
               ON c1.contact_id = c2.contact_id
-             AND c1.created_at = c2.max_time
+             AND CAST(c1.time AS UNSIGNED) = c2.max_time
         """);
 
         query.setParameter("ids", contactIds);
@@ -218,7 +234,7 @@ public class ConversationRepository {
             chat.put("type", r[9]);
             chat.put("method", r[10]);
             chat.put("image_id", r[11]);
-            chat.put("time", r[12]); // kept
+            chat.put("time", r[12]);
             chat.put("template_id", r[13]);
             chat.put("status", r[14]);
             chat.put("is_media", r[15]);
