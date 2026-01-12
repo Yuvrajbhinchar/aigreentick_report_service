@@ -14,6 +14,7 @@ import java.util.Map;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 public class Broadcast {
 
     @Id
@@ -23,6 +24,7 @@ public class Broadcast {
     /* ================= BASIC ================= */
 
     @Column(name = "source", length = 255)
+    @Builder.Default
     private String source = "WEB";
 
     /* ================= RELATION IDS ================= */
@@ -47,22 +49,23 @@ public class Broadcast {
     @Column(name = "campname", nullable = false, length = 255)
     private String campname;
 
-
-    @Column(name = "is_media", nullable = false)
-    private char isMedia;
+    @Column(name = "is_media", nullable = false, columnDefinition = "enum('0','1')")
+    private String isMedia;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "data")
     private Map<String, Object> data;
 
     @Column(name = "total", nullable = false)
+    @Builder.Default
     private Integer total = 0;
 
     @Column(name = "schedule_at")
     private LocalDateTime scheduleAt;
 
-    @Column(name = "status", nullable = false)
-    private char status;
+    @Column(name = "status", nullable = false,columnDefinition = "enum('0','1','2')")
+    @Builder.Default
+    private String status = "1";
 
     /* ================= PAYLOAD ================= */
 
@@ -87,11 +90,11 @@ public class Broadcast {
 
     /* ================= ENUMS (PIN-TO-PIN) ================= */
 
-//    public enum IsMedia {
-//        _0, _1
-//    }
+    public enum IsMedia {
+        _0, _1
+    }
 
-//    public enum Status {
-//        _0, _1, _2
-//    }
+    public enum Status {
+        _0, _1, _2
+    }
 }

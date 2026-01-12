@@ -11,7 +11,6 @@ import java.time.LocalDateTime;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 public class Campaign {
 
     @Id
@@ -37,21 +36,18 @@ public class Campaign {
     @Column(name = "campname", nullable = false, length = 255)
     private String campname;
 
-    @Enumerated(EnumType.STRING)
+
     @Column(name = "is_media", nullable = false)
-    private IsMedia isMedia;
+    private String isMedia;
 
     @Column(name = "col_name", length = 255)
     private String colName;
 
     @Column(name = "total", nullable = false)
-    @Builder.Default
     private Integer total = 0;
 
-    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
-    @Builder.Default
-    private Status status = Status._0;
+    private String status;
 
     @Column(name = "schedule_at")
     private LocalDateTime scheduleAt;

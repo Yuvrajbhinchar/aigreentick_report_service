@@ -60,7 +60,7 @@ public class Wallet {
     /* ================= REFERENCES ================= */
 
     @Column(name = "broadcast_id")
-    private Integer broadcastId;
+    private Long broadcastId;
 
     @Column(name = "scheduled_id")
     private Integer scheduledId;

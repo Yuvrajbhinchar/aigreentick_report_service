@@ -1,55 +1,50 @@
 package com.aigreentick.services.report.entity;
 
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-import java.time.LocalDateTime;
-import java.util.Map;
+import com.aigreentick.services.report.enums.Platform;
 
+import java.time.LocalDateTime;
+
+@Data
 @Entity
 @Table(name = "reports")
-@Getter
-@Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
 public class Report {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /* ===================== RELATIONS ===================== */
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "broadcast_id")
+    @JoinColumn(name = "broadcast_id", nullable = false)
     private Broadcast broadcast;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "campaign_id")
-    private Campaign campaign;
+    @Column(name = "campaign_id")
+    private Long campaignId;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "group_send_id")
-    private SendByGroup groupSend;
+    @Column(name = "group_send_id")
+    private Long groupSendId;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "tag_log_id")
-    private SendByTagLog tagLog;
+    @Column(name = "tag_log_id")
+    private Long tagLogId;
 
-    /* ===================== COLUMNS ===================== */
-
-    @Column(name = "mobile", nullable = false, length = 255)
+    @Column(name = "mobile", nullable = false, length = 20)
     private String mobile;
 
-    @Column(name = "type", nullable = false)
-    @Builder.Default
+    @Column(name = "type", nullable = false, length = 50)
     private String type = "template";
 
     @Column(name = "message_id")
@@ -64,25 +59,18 @@ public class Report {
     @Column(name = "status", nullable = false, length = 522)
     private String status;
 
-    @Lob
-    @Column(name = "payload", columnDefinition = "LONGTEXT")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "response", columnDefinition = "JSON")
+    private String response;
+
     private String payload;
 
-    @Column(name = "payment_status", nullable = false)
-    @Builder.Default
-    private Integer paymentStatus = 0;
-
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "response", columnDefinition = "json")
-    private Map<String, Object> response;
-
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "contact", columnDefinition = "json")
-    private Map<String, Object> contact;
+    @Column(name = "contact", columnDefinition = "JSON")
+    private String contact;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "platform", nullable = false)
-    @Builder.Default
     private Platform platform = Platform.web;
 
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -94,7 +82,14 @@ public class Report {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
-    public enum Platform {
-        api, web
+    @PrePersist
+    protected void onCreate() {
+        createdAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now();
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = LocalDateTime.now();
     }
 }
