@@ -1,7 +1,7 @@
 package com.aigreentick.services.report.service;
 
 import com.aigreentick.services.report.dto.ChatMessageProjection;
-import com.aigreentick.services.report.dto.ChatMessageResponse;
+import com.aigreentick.services.report.dto.chatsDTO.ChatMessageResponse;
 import com.aigreentick.services.report.repository.ChatPaginationRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;

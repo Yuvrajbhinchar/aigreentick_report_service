@@ -37,17 +37,17 @@ public class Wallet {
 
     /* ================= ENUMS ================= */
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "type", nullable = false, columnDefinition = "enum('credit','debit')")
-    private WalletType type;
 
-    @Enumerated(EnumType.STRING)
+    @Column(name = "type", nullable = false, columnDefinition = "enum('credit','debit')")
+    private String type;
+
+
     @Column(
             name = "status",
             nullable = false,
             columnDefinition = "enum('1','0','2') COMMENT '1 is active | 0 is deactive | 2 is ban'"
     )
-    private WalletStatus status;
+    private String status;
 
     /* ================= META ================= */
 
@@ -59,8 +59,9 @@ public class Wallet {
 
     /* ================= REFERENCES ================= */
 
-    @Column(name = "broadcast_id")
-    private Long broadcastId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "broadcast_id", referencedColumnName = "id")
+    private Broadcast broadcast;
 
     @Column(name = "scheduled_id")
     private Integer scheduledId;
@@ -77,15 +78,15 @@ public class Wallet {
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
-    public enum WalletType {
-        credit,
-        debit
-    }
+//    public enum WalletType {
+//        credit,
+//        debit
+//    }
 
-    public enum WalletStatus {
-        _1, // active
-        _0, // deactive
-        _2  // ban
-    }
+//    public enum WalletStatus {
+//        _1, // active
+//        _0, // deactive
+//        _2  // ban
+//    }
 }
 

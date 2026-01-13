@@ -1,6 +1,6 @@
 package com.aigreentick.services.report.controller;
 
-import com.aigreentick.services.report.dto.ChatMessageResponse;
+import com.aigreentick.services.report.dto.chatsDTO.ChatMessageResponse;
 import com.aigreentick.services.report.service.ChatPaginationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;

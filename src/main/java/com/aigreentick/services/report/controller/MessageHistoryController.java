@@ -1,6 +1,6 @@
 package com.aigreentick.services.report.controller;
 
-import com.aigreentick.services.report.dto.MessageHistoryResponse;
+import com.aigreentick.services.report.dto.massagesHistoryDTO.MessageHistoryResponse;
 import com.aigreentick.services.report.service.MessageHistoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;

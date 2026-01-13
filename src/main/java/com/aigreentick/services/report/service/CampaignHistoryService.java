@@ -1,6 +1,8 @@
 package com.aigreentick.services.report.service;
 
-import com.aigreentick.services.report.dto.*;
+import com.aigreentick.services.report.dto.campaignHistoryDTO.BroadcastResponseDTO;
+import com.aigreentick.services.report.dto.campaignHistoryDTO.TemplateComponentDTO;
+import com.aigreentick.services.report.dto.campaignHistoryDTO.TemplateDTO;
 import com.aigreentick.services.report.entity.Broadcast;
 import com.aigreentick.services.report.entity.Template;
 import com.aigreentick.services.report.repository.BroadcastRepository;

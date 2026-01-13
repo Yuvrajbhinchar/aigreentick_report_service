@@ -1,4 +1,4 @@
-package com.aigreentick.services.report.dto;
+package com.aigreentick.services.report.dto.walletDTO;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
