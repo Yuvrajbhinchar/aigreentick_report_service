@@ -2,9 +2,9 @@ package com.aigreentick.services.report.service;
 
 import com.aigreentick.services.report.dto.*;
 import com.aigreentick.services.report.dto.massagesHistoryDTO.MessageHistoryResponse;
-import com.aigreentick.services.report.dto.walletDTO.ChatDTO;
-import com.aigreentick.services.report.dto.walletDTO.ContactDTO;
-import com.aigreentick.services.report.dto.walletDTO.ReportDTO;
+import com.aigreentick.services.report.dto.massagesHistoryDTO.ChatDTO;
+import com.aigreentick.services.report.dto.massagesHistoryDTO.ContactDTO;
+import com.aigreentick.services.report.dto.massagesHistoryDTO.ReportDTO;
 import com.aigreentick.services.report.repository.MessageHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*;

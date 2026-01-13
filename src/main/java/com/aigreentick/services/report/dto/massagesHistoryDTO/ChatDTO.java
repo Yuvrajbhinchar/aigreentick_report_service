@@ -1,4 +1,4 @@
-package com.aigreentick.services.report.dto.walletDTO;
+package com.aigreentick.services.report.dto.massagesHistoryDTO;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -7,8 +7,10 @@ import lombok.NoArgsConstructor;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-public class ReportDTO {
-    private Long id;
+public class ChatDTO {
+    private String text;
+    private String type;
+    private String time;
     private String status;
 }
 

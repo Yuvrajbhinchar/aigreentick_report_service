@@ -1,8 +1,5 @@
 package com.aigreentick.services.report.dto.massagesHistoryDTO;
 
-import com.aigreentick.services.report.dto.walletDTO.ChatDTO;
-import com.aigreentick.services.report.dto.walletDTO.ContactDTO;
-import com.aigreentick.services.report.dto.walletDTO.ReportDTO;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;

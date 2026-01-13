@@ -1,4 +1,4 @@
-package com.aigreentick.services.report.dto.walletDTO;
+package com.aigreentick.services.report.dto.massagesHistoryDTO;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
