@@ -78,4 +78,3 @@ public interface MessageHistoryRepository extends JpaRepository<ContactMessage, 
             Pageable pageable
     );
 }
-
