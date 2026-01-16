@@ -1,6 +1,6 @@
 package com.aigreentick.services.report.dto;
 
-import com.aigreentick.services.report.dto.massagesHistoryDTO.ChatDTO;
+import com.aigreentick.services.report.dto.chatHistoryDTO.ChatDTO;
 
 public record ConversationDto(
         Integer contactId,

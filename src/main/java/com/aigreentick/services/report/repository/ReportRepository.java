@@ -6,6 +6,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.List;
+
 public interface ReportRepository extends JpaRepository<Report, Long> {
 
     @Query("""
@@ -15,4 +17,6 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
     long countByBroadcastAndStatus(Long broadcastId, String status);
 
     Page<Report> findByBroadcastId(Long broadcastId, Pageable pageable);
+
+    List<Report> findByIdIn(List<Long> ids);
 }
