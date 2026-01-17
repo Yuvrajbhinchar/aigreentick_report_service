@@ -1,5 +1,6 @@
 package com.aigreentick.services.report.entity;
 
+import com.aigreentick.services.report.converter.StringListConverter;
 import com.aigreentick.services.report.enums.OtpTypes;
 import com.aigreentick.services.report.entity.SupportedApp;
 import jakarta.persistence.*;
@@ -67,8 +68,9 @@ public class TemplateComponentButton {
     @Column(name = "autofill_text")
     private String autofillText; // new
 
-    @Column(name = "example")
-    List<String> example;// new
+    @Column(name = "example", columnDefinition = "VARBINARY(255)")
+    @Convert(converter = StringListConverter.class)
+    private List<String> example;
 
     @OneToMany(mappedBy = "button", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
