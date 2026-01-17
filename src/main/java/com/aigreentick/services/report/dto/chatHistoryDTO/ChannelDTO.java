@@ -11,10 +11,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ChannelDTO {
-    private Integer id;
+    private Long id;
 
     @JsonProperty("user_id")
-    private Integer userId;
+    private Long userId;
 
     @JsonProperty("created_by")
     private Integer createdBy;

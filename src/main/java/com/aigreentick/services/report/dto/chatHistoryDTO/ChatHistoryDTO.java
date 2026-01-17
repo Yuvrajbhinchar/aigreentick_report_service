@@ -16,4 +16,3 @@ public class ChatHistoryDTO {
     private List<ChannelDTO> channel;
 
 }
-

@@ -1,6 +1,6 @@
 package com.aigreentick.services.report.mapper;
 
-import com.aigreentick.services.report.dto.campaignHistoryDTO.ReportDTO;
+import com.aigreentick.services.report.dto.chatHistoryDTO.ReportDTO;
 import com.aigreentick.services.report.dto.chatHistoryDTO.ChatDTO;
 import com.aigreentick.services.report.dto.chatHistoryDTO.ConversationDTO;
 import com.aigreentick.services.report.dto.chatHistoryDTO.ContactDTO;
@@ -18,7 +18,7 @@ public class ChatHistoryMapper {
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public ConversationDTO mapToConversationDTO(Map<String, Object> row) {
-                ContactDTO contactDTO = ContactDTO.builder()
+        ContactDTO contactDTO = ContactDTO.builder()
                 .id(getInteger(row, "contact_id"))
                 .name(getString(row, "contact_name"))
                 .mobile(getString(row, "contact_mobile"))
@@ -26,7 +26,7 @@ public class ChatHistoryMapper {
                 .countryId(getString(row, "contact_country_id"))
                 .build();
 
-            ChatDTO chatDTO = null;
+        ChatDTO chatDTO = null;
         if (row.get("chat_text") != null) {
             chatDTO = ChatDTO.builder()
                     .text(getString(row, "chat_text"))
@@ -36,7 +36,7 @@ public class ChatHistoryMapper {
                     .build();
         }
 
-            ReportDTO reportDTO = null;
+        ReportDTO reportDTO = null;
         if (row.get("report_id") != null) {
             reportDTO = ReportDTO.builder()
                     .id(getLong(row, "report_id"))

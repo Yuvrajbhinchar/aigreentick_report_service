@@ -1,7 +1,7 @@
 package com.aigreentick.services.report.dto.chatHistoryDTO;
 
 
-import com.aigreentick.services.report.dto.campaignHistoryDTO.ReportDTO;
+import com.aigreentick.services.report.dto.chatHistoryDTO.ReportDTO;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;

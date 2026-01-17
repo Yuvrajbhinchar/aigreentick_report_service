@@ -1,5 +1,6 @@
 package com.aigreentick.services.report.entity;
 
+
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -81,10 +82,9 @@ public class User {
 
     /* ================= STATUS FLAGS ================= */
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "online_status", nullable = false)
+    @Column(name = "online_status", nullable = false,columnDefinition = "enum('0','1')")
     @Builder.Default
-    private OnlineStatus onlineStatus = OnlineStatus._0;
+    private String onlineStatus = "0";
 
     @Column(name = "agent_id")
     private Integer agentId;
@@ -97,9 +97,8 @@ public class User {
     @Builder.Default
     private Double debit = 0.0;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
-    private AccountStatus status;
+    @Column(name = "status", nullable = false, columnDefinition = "enum('1','0','2') COMMENT '1 is active | 0 is deactive | 2 is ban'")
+    private String status;
 
     @Column(name = "domain", length = 255)
     private String domain;
@@ -148,16 +147,8 @@ public class User {
 
     /* ================= ENUMS (PIN-TO-PIN) ================= */
 
-    public enum OnlineStatus {
-        _0, _1
-    }
-
-    public enum AccountStatus {
-        _0, _1, _2
-    }
-
     public enum DemoStatus {
         on, off
+
     }
 }
-
