@@ -68,7 +68,7 @@ public class TemplateComponentButton {
     private String autofillText; // new
 
     @Column(name = "example")
-    private String example;// new
+    List<String> example;// new
 
     @OneToMany(mappedBy = "button", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
