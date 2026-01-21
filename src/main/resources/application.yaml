@@ -1,0 +1,25 @@
+spring:
+  application:
+    name: report
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/aigreentick_temp?serverTimezone=UTC&useServerPrepStmts=true&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048&useLocalSessionState=true&rewriteBatchedStatements=true&cacheServerConfiguration=true&cacheResultSetMetadata=true&maintainTimeStats=false
+    username: root
+    password: yuvraj@3933
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    database-platform: org.hibernate.dialect.MySQLDialect
+    show-sql: false
+    open-in-view: false
+
+  hikari:
+    minimum-idle: 5
+    maximum-pool-size: 20
+    idle-timeout: 30000
+    max-lifetime: 600000
+    connection-timeout: 30000
