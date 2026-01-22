@@ -2,13 +2,11 @@ package com.aigreentick.services.report.controller;
 
 
 import com.aigreentick.services.report.dto.MessageHistoryDTO.MessageHistoryWrapperResponse;
-import com.aigreentick.services.report.service.MessageHistoryService;
 import com.aigreentick.services.report.service.UltraFastMessageHistoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 
 @RestController

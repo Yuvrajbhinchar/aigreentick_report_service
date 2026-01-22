@@ -17,7 +17,7 @@ public class PhpStyleMessageHistoryRepository {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * PHP-STYLE: Get only the contact IDs first (LIGHTNING FAST)
+     * STEP 1: Get only contact IDs (FAST - minimal data)
      */
     public List<Long> getLatestContactIds(
             Long userId,
@@ -45,7 +45,6 @@ public class PhpStyleMessageHistoryRepository {
         params.add(userId);
         params.add(userId);
 
-        // Search filter
         if (search != null && !search.isBlank()) {
             sql.append(" AND (cc.mobile LIKE ? OR cc.name LIKE ?) ");
             String searchPattern = "%" + search + "%";
@@ -53,7 +52,6 @@ public class PhpStyleMessageHistoryRepository {
             params.add(searchPattern);
         }
 
-        // Date filters
         if (fromDate != null) {
             sql.append(" AND cm.created_at >= ? ");
             params.add(Timestamp.valueOf(fromDate));
@@ -72,7 +70,7 @@ public class PhpStyleMessageHistoryRepository {
     }
 
     /**
-     * Get full message data for specific contact IDs (FAST - indexed lookup)
+     * STEP 2: Get full message data for specific contact IDs
      */
     public List<Map<String, Object>> getMessagesForContacts(Long userId, List<Long> contactIds) {
         if (contactIds.isEmpty()) return Collections.emptyList();
@@ -139,7 +137,7 @@ public class PhpStyleMessageHistoryRepository {
     }
 
     /**
-     * Calculate unread count ONLY for specific contacts (FAST - targeted query)
+     * STEP 3: Get unread counts for specific contacts
      */
     public Map<Long, Integer> getUnreadCountsForContacts(List<Long> contactIds) {
         if (contactIds.isEmpty()) return Collections.emptyMap();
@@ -174,7 +172,7 @@ public class PhpStyleMessageHistoryRepository {
     }
 
     /**
-     * Get last chat time ONLY for specific contacts (FAST - targeted query)
+     * STEP 4: Get last chat times for specific contacts
      */
     public Map<Long, Long> getLastChatTimesForContacts(List<Long> contactIds) {
         if (contactIds.isEmpty()) return Collections.emptyMap();
@@ -207,7 +205,7 @@ public class PhpStyleMessageHistoryRepository {
     }
 
     /**
-     * Fast count - simplified
+     * Count total contacts
      */
     public long countTotalContacts(
             Long userId,

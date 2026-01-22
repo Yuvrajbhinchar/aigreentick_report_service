@@ -1,6 +1,8 @@
 package com.aigreentick.services.report.service;
 
-
+import com.aigreentick.services.report.dto.MessageHistoryDTO.MessageHistoryPageResponse;
+import com.aigreentick.services.report.dto.MessageHistoryDTO.MessageHistoryWrapperResponse;
+import com.aigreentick.services.report.dto.MessageHistoryDTO.PageLink;
 import com.aigreentick.services.report.dto.MessageHistoryDTO.*;
 import com.aigreentick.services.report.repository.PhpStyleMessageHistoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -33,11 +35,12 @@ public class PhpStyleMessageHistoryService {
             LocalDateTime toDate
     ) {
         long startTime = System.currentTimeMillis();
-        log.info("=== PHP-Style Service START - User: {}, Page: {}, PerPage: {} ===", userId, page, perPage);
+        log.info("=== PhpStyleMessageHistoryService START - User: {}, Page: {}, PerPage: {} ===",
+                userId, page, perPage);
 
         int offset = (page - 1) * perPage;
 
-        // STEP 1: Get only contact IDs (FAST - minimal data)
+        // STEP 1: Get only contact IDs (FAST)
         List<Long> contactIds = repository.getLatestContactIds(
                 userId, search, filter, fromDate, toDate, perPage, offset
         );
@@ -49,50 +52,41 @@ public class PhpStyleMessageHistoryService {
             return buildEmptyResponse(page, perPage, userId);
         }
 
-        // STEP 2: Get full message data for these contacts only (FAST - indexed)
+        // STEP 2: Get full message data for these contacts
         long step2Start = System.currentTimeMillis();
         List<Map<String, Object>> messages = repository.getMessagesForContacts(userId, contactIds);
         log.info("Step 2: Got messages in {}ms", System.currentTimeMillis() - step2Start);
 
-        // STEP 3: Get unread counts ONLY for these contacts (FAST - small dataset)
+        // STEP 3: Get unread counts and last chat times for these contacts
         long step3Start = System.currentTimeMillis();
-        Map<Long, Integer> unreadCounts = Collections.emptyMap();
-        Map<Long, Long> lastChatTimes = Collections.emptyMap();
-
-        if (filter == null || !filter.equals("none")) {
-            unreadCounts = repository.getUnreadCountsForContacts(contactIds);
-            lastChatTimes = repository.getLastChatTimesForContacts(contactIds);
-        }
+        Map<Long, Integer> unreadCounts = repository.getUnreadCountsForContacts(contactIds);
+        Map<Long, Long> lastChatTimes = repository.getLastChatTimesForContacts(contactIds);
         log.info("Step 3: Got metadata in {}ms", System.currentTimeMillis() - step3Start);
 
-        // STEP 4: Apply filter AFTER fetching (like PHP does)
+        // STEP 4: Apply filters if needed
         List<Map<String, Object>> filteredMessages = messages;
+
         if ("unread".equalsIgnoreCase(filter)) {
-            Map<Long, Integer> finalUnreadCounts = unreadCounts;
             filteredMessages = messages.stream()
                     .filter(m -> {
                         Long contactId = ((Number) m.get("contact_id")).longValue();
-                        return finalUnreadCounts.getOrDefault(contactId, 0) > 0;
+                        return unreadCounts.getOrDefault(contactId, 0) > 0;
                     })
                     .collect(Collectors.toList());
         } else if ("active".equalsIgnoreCase(filter)) {
             long activeSince = (System.currentTimeMillis() / 1000) - 86400;
-            Map<Long, Long> finalLastChatTimes = lastChatTimes;
             filteredMessages = messages.stream()
                     .filter(m -> {
                         Long contactId = ((Number) m.get("contact_id")).longValue();
-                        Long lastTime = finalLastChatTimes.get(contactId);
+                        Long lastTime = lastChatTimes.get(contactId);
                         return lastTime != null && lastTime >= activeSince;
                     })
                     .collect(Collectors.toList());
         }
 
         // STEP 5: Assemble DTOs
-        Map<Long, Integer> finalUnreadCounts = unreadCounts;
-        Map<Long, Long> finalLastChatTimes = lastChatTimes;
-
         List<MessageHistoryContactDTO> dtos = filteredMessages.stream()
-                .map(msg -> assembleDTO(msg, finalUnreadCounts, finalLastChatTimes))
+                .map(msg -> assembleDTO(msg, unreadCounts, lastChatTimes))
                 .collect(Collectors.toList());
 
         // STEP 6: Get total count
@@ -107,7 +101,7 @@ public class PhpStyleMessageHistoryService {
         );
 
         long totalTime = System.currentTimeMillis() - startTime;
-        log.info("=== PHP-Style Service END - Total time: {}ms ===", totalTime);
+        log.info("=== PhpStyleMessageHistoryService END - Total time: {}ms ===", totalTime);
 
         return MessageHistoryWrapperResponse.builder()
                 .users(pageResponse)
@@ -122,7 +116,6 @@ public class PhpStyleMessageHistoryService {
     ) {
         Long contactId = ((Number) msg.get("contact_id")).longValue();
 
-        // Contact info
                 ContactInfo contact = ContactInfo.builder()
                 .id(contactId)
                 .name((String) msg.get("cc_name"))
@@ -131,8 +124,7 @@ public class PhpStyleMessageHistoryService {
                 .countryId((String) msg.get("cc_country_id"))
                 .build();
 
-        // Chat info
-        ChatInfo chat = null;
+            ChatInfo chat = null;
         if (msg.get("chat_id") != null && msg.get("chat_text") != null) {
             chat =  ChatInfo.builder()
                     .text((String) msg.get("chat_text"))
@@ -142,7 +134,6 @@ public class PhpStyleMessageHistoryService {
                     .build();
         }
 
-        // Report info
             ReportInfo report = null;
         if (msg.get("report_id") != null && msg.get("report_status") != null) {
             report = ReportInfo.builder()
