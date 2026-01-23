@@ -12,7 +12,7 @@ import java.util.*;
 @Repository
 @RequiredArgsConstructor
 @Slf4j
-public class PhpStyleMessageHistoryRepository {
+public class MessageHistoryRepository {
 
     private final JdbcTemplate jdbcTemplate;
 

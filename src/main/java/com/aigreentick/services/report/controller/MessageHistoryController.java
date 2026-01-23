@@ -1,7 +1,7 @@
 package com.aigreentick.services.report.controller;
 
 import com.aigreentick.services.report.dto.MessageHistoryDTO.MessageHistoryWrapperResponse;
-import com.aigreentick.services.report.service.PhpStyleMessageHistoryService;
+import com.aigreentick.services.report.service.MessageHistoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -14,9 +14,9 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 @RequestMapping("/api/v4")
 @Slf4j
-public class PhpStyleMessageHistoryController {
+public class MessageHistoryController {
 
-    private final PhpStyleMessageHistoryService service;
+    private final MessageHistoryService service;
 
     @GetMapping("/get-messages-history")
     public ResponseEntity<MessageHistoryWrapperResponse> getMessagesHistory(

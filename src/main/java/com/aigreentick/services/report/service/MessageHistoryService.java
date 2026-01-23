@@ -1,8 +1,10 @@
 package com.aigreentick.services.report.service;
 
+import com.aigreentick.services.report.dto.MessageHistoryDTO.MessageHistoryPageResponse;
+import com.aigreentick.services.report.dto.MessageHistoryDTO.MessageHistoryWrapperResponse;
+import com.aigreentick.services.report.dto.MessageHistoryDTO.PageLink;
 import com.aigreentick.services.report.dto.MessageHistoryDTO.*;
-import com.aigreentick.services.report.entity.WhatsappAccount;
-import com.aigreentick.services.report.repository.OptimizedMessageHistoryRepository;
+import com.aigreentick.services.report.repository.MessageHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -16,9 +18,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class OptimizedMessageHistoryService {
+public class MessageHistoryService {
 
-    private final OptimizedMessageHistoryRepository repository;
+    private final MessageHistoryRepository repository;
     private final JdbcTemplate jdbcTemplate;
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -33,58 +35,73 @@ public class OptimizedMessageHistoryService {
             LocalDateTime toDate
     ) {
         long startTime = System.currentTimeMillis();
-        log.info("=== OptimizedMessageHistoryService START - User: {}, Page: {}, PerPage: {} ===",
+        log.info("=== PhpStyleMessageHistoryService START - User: {}, Page: {}, PerPage: {} ===",
                 userId, page, perPage);
 
         int offset = (page - 1) * perPage;
 
-        // STEP 1: Get latest messages with contact info and metadata (FAST)
-        List<Map<String, Object>> messages = repository.getLatestMessagesWithMetadata(
+        // STEP 1: Get only contact IDs (FAST)
+        List<Long> contactIds = repository.getLatestContactIds(
                 userId, search, filter, fromDate, toDate, perPage, offset
         );
 
-        log.info("Step 1 completed: {} messages found in {}ms",
-                messages.size(), System.currentTimeMillis() - startTime);
+        log.info("Step 1: Got {} contact IDs in {}ms",
+                contactIds.size(), System.currentTimeMillis() - startTime);
 
-        // STEP 2: Extract IDs for batch fetching
-        List<Long> chatIds = messages.stream()
-                .map(m -> m.get("chat_id"))
-                .filter(Objects::nonNull)
-                .map(id -> ((Number) id).longValue())
+        if (contactIds.isEmpty()) {
+            return buildEmptyResponse(page, perPage, userId);
+        }
+
+        // STEP 2: Get full message data for these contacts
+        long step2Start = System.currentTimeMillis();
+        List<Map<String, Object>> messages = repository.getMessagesForContacts(userId, contactIds);
+        log.info("Step 2: Got messages in {}ms", System.currentTimeMillis() - step2Start);
+
+        // STEP 3: Get unread counts and last chat times for these contacts
+        long step3Start = System.currentTimeMillis();
+        Map<Long, Integer> unreadCounts = repository.getUnreadCountsForContacts(contactIds);
+        Map<Long, Long> lastChatTimes = repository.getLastChatTimesForContacts(contactIds);
+        log.info("Step 3: Got metadata in {}ms", System.currentTimeMillis() - step3Start);
+
+        // STEP 4: Apply filters if needed
+        List<Map<String, Object>> filteredMessages = messages;
+
+        if ("unread".equalsIgnoreCase(filter)) {
+            filteredMessages = messages.stream()
+                    .filter(m -> {
+                        Long contactId = ((Number) m.get("contact_id")).longValue();
+                        return unreadCounts.getOrDefault(contactId, 0) > 0;
+                    })
+                    .collect(Collectors.toList());
+        } else if ("active".equalsIgnoreCase(filter)) {
+            long activeSince = (System.currentTimeMillis() / 1000) - 86400;
+            filteredMessages = messages.stream()
+                    .filter(m -> {
+                        Long contactId = ((Number) m.get("contact_id")).longValue();
+                        Long lastTime = lastChatTimes.get(contactId);
+                        return lastTime != null && lastTime >= activeSince;
+                    })
+                    .collect(Collectors.toList());
+        }
+
+        // STEP 5: Assemble DTOs
+        List<MessageHistoryContactDTO> dtos = filteredMessages.stream()
+                .map(msg -> assembleDTO(msg, unreadCounts, lastChatTimes))
                 .collect(Collectors.toList());
 
-        List<Long> reportIds = messages.stream()
-                .map(m -> m.get("report_id"))
-                .filter(Objects::nonNull)
-                .map(id -> ((Number) id).longValue())
-                .collect(Collectors.toList());
+        // STEP 6: Get total count
+        long totalCount = repository.countTotalContacts(userId, search, fromDate, toDate);
 
-        // STEP 3: Batch fetch chats and reports (2 FAST queries instead of N queries)
-        long batchStartTime = System.currentTimeMillis();
-        Map<Long, Map<String, Object>> chatsMap = repository.getChatsForIds(chatIds);
-        Map<Long, Map<String, Object>> reportsMap = repository.getReportsForIds(reportIds);
-
-        log.info("Step 2-3 completed: Batch fetched {} chats and {} reports in {}ms",
-                chatsMap.size(), reportsMap.size(), System.currentTimeMillis() - batchStartTime);
-
-        // STEP 4: Assemble DTOs (in-memory - microseconds)
-        List<MessageHistoryContactDTO> dtos = messages.stream()
-                .map(msg -> assembleDTO(msg, chatsMap, reportsMap))
-                .collect(Collectors.toList());
-
-        // STEP 5: Get total count for pagination
-        long totalCount = repository.countTotalMessages(userId, search, filter, fromDate, toDate);
-
-        // STEP 6: Get channel info
+        // STEP 7: Get channel info
         List<MessageHistoryWrapperResponse.ChannelInfo> channels = getChannelInfo(userId);
 
-        // STEP 7: Build pagination response
+        // STEP 8: Build pagination
         MessageHistoryPageResponse pageResponse = buildPaginationResponse(
                 dtos, page, perPage, totalCount
         );
 
         long totalTime = System.currentTimeMillis() - startTime;
-        log.info("=== OptimizedMessageHistoryService END - Total time: {}ms ===", totalTime);
+        log.info("=== PhpStyleMessageHistoryService END - Total time: {}ms ===", totalTime);
 
         return MessageHistoryWrapperResponse.builder()
                 .users(pageResponse)
@@ -94,56 +111,69 @@ public class OptimizedMessageHistoryService {
 
     private MessageHistoryContactDTO assembleDTO(
             Map<String, Object> msg,
-            Map<Long, Map<String, Object>> chatsMap,
-            Map<Long, Map<String, Object>> reportsMap
+            Map<Long, Integer> unreadCounts,
+            Map<Long, Long> lastChatTimes
     ) {
-        // Contact info
+        Long contactId = ((Number) msg.get("contact_id")).longValue();
+
                 ContactInfo contact = ContactInfo.builder()
-                .id(((Number) msg.get("contact_id")).longValue())
+                .id(contactId)
                 .name((String) msg.get("cc_name"))
                 .mobile((String) msg.get("cc_mobile"))
                 .email((String) msg.get("cc_email"))
                 .countryId((String) msg.get("cc_country_id"))
                 .build();
 
-        // Chat info (if exists)
             ChatInfo chat = null;
-        if (msg.get("chat_id") != null) {
-            Long chatId = ((Number) msg.get("chat_id")).longValue();
-            Map<String, Object> chatData = chatsMap.get(chatId);
-            if (chatData != null) {
-                chat = ChatInfo.builder()
-                        .text((String) chatData.get("text"))
-                        .type((String) chatData.get("type"))
-                        .time((String) chatData.get("time"))
-                        .status((String) chatData.get("status"))
-                        .build();
-            }
+        if (msg.get("chat_id") != null && msg.get("chat_text") != null) {
+            chat =  ChatInfo.builder()
+                    .text((String) msg.get("chat_text"))
+                    .type((String) msg.get("chat_type"))
+                    .time((String) msg.get("chat_time"))
+                    .status((String) msg.get("chat_status"))
+                    .build();
         }
 
-        // Report info (if exists)
             ReportInfo report = null;
-        if (msg.get("report_id") != null) {
-            Long reportId = ((Number) msg.get("report_id")).longValue();
-            Map<String, Object> reportData = reportsMap.get(reportId);
-            if (reportData != null) {
-                report = ReportInfo.builder()
-                        .id(reportId)
-                        .status((String) reportData.get("status"))
-                        .build();
-            }
+        if (msg.get("report_id") != null && msg.get("report_status") != null) {
+            report = ReportInfo.builder()
+                    .id(((Number) msg.get("report_id")).longValue())
+                    .status((String) msg.get("report_status"))
+                    .build();
         }
 
         return MessageHistoryContactDTO.builder()
                 .id(((Number) msg.get("id")).longValue())
-                .contactId(((Number) msg.get("contact_id")).longValue())
+                .contactId(contactId)
                 .contact(contact)
                 .chat(chat)
                 .report(report)
-                .unreadCount((Integer) msg.get("unread_count"))
-                .lastChatTime(msg.get("last_chat_time") != null ?
-                        ((Number) msg.get("last_chat_time")).longValue() : null)
+                .unreadCount(unreadCounts.getOrDefault(contactId, 0))
+                .lastChatTime(lastChatTimes.get(contactId))
                 .createdAt((LocalDateTime) msg.get("created_at"))
+                .build();
+    }
+
+    private MessageHistoryWrapperResponse buildEmptyResponse(int page, int perPage, Long userId) {
+        MessageHistoryPageResponse pageResponse = MessageHistoryPageResponse.builder()
+                .currentPage(page)
+                .data(Collections.emptyList())
+                .firstPageUrl("https://aigreentick.com/api/v1/get-messages-history?page=1")
+                .from(null)
+                .lastPage(0)
+                .lastPageUrl("https://aigreentick.com/api/v1/get-messages-history?page=0")
+                .links(Collections.emptyList())
+                .nextPageUrl(null)
+                .path("https://aigreentick.com/api/v1/get-messages-history")
+                .perPage(perPage)
+                .prevPageUrl(null)
+                .to(null)
+                .total(0L)
+                .build();
+
+        return MessageHistoryWrapperResponse.builder()
+                .users(pageResponse)
+                .channel(getChannelInfo(userId))
                 .build();
     }
 
@@ -165,7 +195,7 @@ public class OptimizedMessageHistoryService {
                 .active(false)
                 .build());
 
-        // Page number links (show max 10 pages)
+        // Page number links
         int startPage = Math.max(1, page - 4);
         int endPage = Math.min(lastPage, page + 5);
 
@@ -236,19 +266,9 @@ public class OptimizedMessageHistoryService {
     private List<MessageHistoryWrapperResponse.ChannelInfo> getChannelInfo(Long userId) {
         String sql = """
             SELECT
-                id,
-                user_id,
-                created_by,
-                whatsapp_no,
-                whatsapp_no_id,
-                whatsapp_biz_id,
-                parmenent_token,
-                token,
-                status,
-                response,
-                created_at,
-                updated_at,
-                deleted_at
+                id, user_id, created_by, whatsapp_no, whatsapp_no_id,
+                whatsapp_biz_id, parmenent_token, token, status, response,
+                created_at, updated_at, deleted_at
             FROM whatsapp_accounts
             WHERE user_id = ?
         """;
