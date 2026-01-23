@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -35,73 +34,47 @@ public class MessageHistoryService {
             LocalDateTime toDate
     ) {
         long startTime = System.currentTimeMillis();
-        log.info("=== PhpStyleMessageHistoryService START - User: {}, Page: {}, PerPage: {} ===",
-                userId, page, perPage);
+        log.info("=== OPTIMIZED MessageHistoryService START - User: {}, Page: {}, PerPage: {}, Filter: {} ===",
+                userId, page, perPage, filter);
 
         int offset = (page - 1) * perPage;
 
-        // STEP 1: Get only contact IDs (FAST)
-        List<Long> contactIds = repository.getLatestContactIds(
+        // SINGLE QUERY: Get all data at once (messages + metadata)
+        List<Map<String, Object>> messages = repository.getLatestMessagesOptimized(
                 userId, search, filter, fromDate, toDate, perPage, offset
         );
 
-        log.info("Step 1: Got {} contact IDs in {}ms",
-                contactIds.size(), System.currentTimeMillis() - startTime);
+        log.info("Step 1: Got {} messages with metadata in {}ms",
+                messages.size(), System.currentTimeMillis() - startTime);
 
-        if (contactIds.isEmpty()) {
+        if (messages.isEmpty()) {
             return buildEmptyResponse(page, perPage, userId);
         }
 
-        // STEP 2: Get full message data for these contacts
-        long step2Start = System.currentTimeMillis();
-        List<Map<String, Object>> messages = repository.getMessagesForContacts(userId, contactIds);
-        log.info("Step 2: Got messages in {}ms", System.currentTimeMillis() - step2Start);
+        // Assemble DTOs (data is already joined)
+        List<MessageHistoryContactDTO> dtos = messages.stream()
+                .map(this::assembleDTOOptimized)
+                .toList();
 
-        // STEP 3: Get unread counts and last chat times for these contacts
-        long step3Start = System.currentTimeMillis();
-        Map<Long, Integer> unreadCounts = repository.getUnreadCountsForContacts(contactIds);
-        Map<Long, Long> lastChatTimes = repository.getLastChatTimesForContacts(contactIds);
-        log.info("Step 3: Got metadata in {}ms", System.currentTimeMillis() - step3Start);
+        // Get total count
+        long totalCount = repository.countTotalContactsOptimized(
+                userId, search, filter, fromDate, toDate
+        );
 
-        // STEP 4: Apply filters if needed
-        List<Map<String, Object>> filteredMessages = messages;
+        log.info("Step 2: Count query completed in {}ms",
+                System.currentTimeMillis() - startTime);
 
-        if ("unread".equalsIgnoreCase(filter)) {
-            filteredMessages = messages.stream()
-                    .filter(m -> {
-                        Long contactId = ((Number) m.get("contact_id")).longValue();
-                        return unreadCounts.getOrDefault(contactId, 0) > 0;
-                    })
-                    .collect(Collectors.toList());
-        } else if ("active".equalsIgnoreCase(filter)) {
-            long activeSince = (System.currentTimeMillis() / 1000) - 86400;
-            filteredMessages = messages.stream()
-                    .filter(m -> {
-                        Long contactId = ((Number) m.get("contact_id")).longValue();
-                        Long lastTime = lastChatTimes.get(contactId);
-                        return lastTime != null && lastTime >= activeSince;
-                    })
-                    .collect(Collectors.toList());
-        }
-
-        // STEP 5: Assemble DTOs
-        List<MessageHistoryContactDTO> dtos = filteredMessages.stream()
-                .map(msg -> assembleDTO(msg, unreadCounts, lastChatTimes))
-                .collect(Collectors.toList());
-
-        // STEP 6: Get total count
-        long totalCount = repository.countTotalContacts(userId, search, fromDate, toDate);
-
-        // STEP 7: Get channel info
+        // Get channel info
         List<MessageHistoryWrapperResponse.ChannelInfo> channels = getChannelInfo(userId);
 
-        // STEP 8: Build pagination
+        // Build pagination
         MessageHistoryPageResponse pageResponse = buildPaginationResponse(
                 dtos, page, perPage, totalCount
         );
 
         long totalTime = System.currentTimeMillis() - startTime;
-        log.info("=== PhpStyleMessageHistoryService END - Total time: {}ms ===", totalTime);
+        log.info("=== OPTIMIZED MessageHistoryService END - Total time: {}ms (improvement vs old approach) ===",
+                totalTime);
 
         return MessageHistoryWrapperResponse.builder()
                 .users(pageResponse)
@@ -109,14 +82,14 @@ public class MessageHistoryService {
                 .build();
     }
 
-    private MessageHistoryContactDTO assembleDTO(
-            Map<String, Object> msg,
-            Map<Long, Integer> unreadCounts,
-            Map<Long, Long> lastChatTimes
-    ) {
+    /**
+     * Assemble DTO from single row (all data already joined)
+     */
+    private MessageHistoryContactDTO assembleDTOOptimized(Map<String, Object> msg) {
         Long contactId = ((Number) msg.get("contact_id")).longValue();
 
-                ContactInfo contact = ContactInfo.builder()
+        // Contact info
+        ContactInfo contact = ContactInfo.builder()
                 .id(contactId)
                 .name((String) msg.get("cc_name"))
                 .mobile((String) msg.get("cc_mobile"))
@@ -124,9 +97,10 @@ public class MessageHistoryService {
                 .countryId((String) msg.get("cc_country_id"))
                 .build();
 
-            ChatInfo chat = null;
+        // Chat info (if exists)
+        ChatInfo chat = null;
         if (msg.get("chat_id") != null && msg.get("chat_text") != null) {
-            chat =  ChatInfo.builder()
+            chat = ChatInfo.builder()
                     .text((String) msg.get("chat_text"))
                     .type((String) msg.get("chat_type"))
                     .time((String) msg.get("chat_time"))
@@ -134,13 +108,19 @@ public class MessageHistoryService {
                     .build();
         }
 
-            ReportInfo report = null;
-        if (msg.get("report_id") != null && msg.get("report_status") != null) {
+        // Report info (if exists)
+        ReportInfo report = null;
+        if (msg.get("report_id_val") != null && msg.get("report_status") != null) {
             report = ReportInfo.builder()
-                    .id(((Number) msg.get("report_id")).longValue())
+                    .id(((Number) msg.get("report_id_val")).longValue())
                     .status((String) msg.get("report_status"))
                     .build();
         }
+
+        // Extract metadata (already in the row)
+        Integer unreadCount = ((Number) msg.get("unread_count")).intValue();
+        Object lastChatTimeObj = msg.get("last_chat_time");
+        Long lastChatTime = lastChatTimeObj != null ? ((Number) lastChatTimeObj).longValue() : null;
 
         return MessageHistoryContactDTO.builder()
                 .id(((Number) msg.get("id")).longValue())
@@ -148,8 +128,8 @@ public class MessageHistoryService {
                 .contact(contact)
                 .chat(chat)
                 .report(report)
-                .unreadCount(unreadCounts.getOrDefault(contactId, 0))
-                .lastChatTime(lastChatTimes.get(contactId))
+                .unreadCount(unreadCount)
+                .lastChatTime(lastChatTime)
                 .createdAt((LocalDateTime) msg.get("created_at"))
                 .build();
     }
@@ -195,7 +175,7 @@ public class MessageHistoryService {
                 .active(false)
                 .build());
 
-        // Page number links
+        // Page number links (show up to 10 pages)
         int startPage = Math.max(1, page - 4);
         int endPage = Math.min(lastPage, page + 5);
 

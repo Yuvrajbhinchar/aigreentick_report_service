@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 
 @RestController
 @RequiredArgsConstructor
-@RequestMapping("/api/v4")
+@RequestMapping("/api/v1")
 @Slf4j
 public class MessageHistoryController {
 
