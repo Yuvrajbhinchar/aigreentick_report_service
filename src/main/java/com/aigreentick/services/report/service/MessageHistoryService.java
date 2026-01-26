@@ -4,7 +4,6 @@ import com.aigreentick.services.report.dto.MessageHistoryDTO.*;
 import com.aigreentick.services.report.repository.MessageHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -27,8 +26,11 @@ public class MessageHistoryService {
     private static final long CHANNEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final int MAX_VISIBLE_PAGES = 7; // Reduced from 10
+    private static final int MAX_VISIBLE_PAGES = 7;
 
+    /**
+     * ULTRA-OPTIMIZED: Single query execution (data + count in one go)
+     */
     public MessageHistoryWrapperResponse getMessagesHistory(
             Long userId,
             int perPage,
@@ -39,37 +41,38 @@ public class MessageHistoryService {
             LocalDateTime toDate
     ) {
         long startTime = System.currentTimeMillis();
-        log.debug("MessageHistoryService START - User: {}, Page: {}, Filter: {}", userId, page, filter);
+        log.info("=== MessageHistory API START - User: {}, Page: {}, Filter: {} ===", userId, page, filter);
 
         int offset = (page - 1) * perPage;
 
-        // OPTIMIZATION 1: Single query with all data
-        List<Map<String, Object>> messages = repository.getLatestMessagesOptimized(
+        // SINGLE QUERY: Get both data and total count
+        MessageHistoryRepository.MessageHistoryResult result = repository.getLatestMessagesWithCount(
                 userId, search, filter, fromDate, toDate, perPage, offset
         );
 
+        List<Map<String, Object>> messages = result.getData();
+        long totalCount = result.getTotalCount();
+
         if (messages.isEmpty()) {
+            log.info("=== No messages found - returning empty response in {}ms ===",
+                    System.currentTimeMillis() - startTime);
             return buildEmptyResponse(page, perPage, userId);
         }
 
-        // OPTIMIZATION 2: Batch DTO assembly using stream and direct mapping
+        // Batch DTO assembly (no database calls)
         List<MessageHistoryContactDTO> dtos = assembleDTOsBatch(messages);
 
-        // OPTIMIZATION 3: Count query only if needed (cache total for same filters)
-        long totalCount = repository.countTotalContactsOptimized(
-                userId, search, filter, fromDate, toDate
-        );
-
-        // OPTIMIZATION 4: Get cached channel info
+        // Get cached channel info (no database call if cached)
         List<MessageHistoryWrapperResponse.ChannelInfo> channels = getCachedChannelInfo(userId);
 
-        // OPTIMIZATION 5: Optimized pagination response
+        // Build pagination response (pure calculation, no database)
         MessageHistoryPageResponse pageResponse = buildOptimizedPaginationResponse(
                 dtos, page, perPage, totalCount
         );
 
         long totalTime = System.currentTimeMillis() - startTime;
-        log.debug("MessageHistoryService END - Total time: {}ms", totalTime);
+        log.info("=== MessageHistory API END - Total time: {}ms, Records: {}, Total: {} ===",
+                totalTime, dtos.size(), totalCount);
 
         return MessageHistoryWrapperResponse.builder()
                 .users(pageResponse)
@@ -78,7 +81,7 @@ public class MessageHistoryService {
     }
 
     /**
-     * OPTIMIZATION 2: Batch assembly with minimal object creation
+     * OPTIMIZATION: Batch assembly with minimal object creation
      */
     private List<MessageHistoryContactDTO> assembleDTOsBatch(List<Map<String, Object>> messages) {
         List<MessageHistoryContactDTO> dtos = new ArrayList<>(messages.size());
@@ -160,7 +163,7 @@ public class MessageHistoryService {
     }
 
     /**
-     * OPTIMIZATION 4: Cached channel info with TTL
+     * OPTIMIZATION: Cached channel info with TTL
      */
     private List<MessageHistoryWrapperResponse.ChannelInfo> getCachedChannelInfo(Long userId) {
         CacheEntry<List<MessageHistoryWrapperResponse.ChannelInfo>> cached = channelCache.get(userId);
@@ -171,6 +174,7 @@ public class MessageHistoryService {
         }
 
         // Cache miss or expired - fetch fresh data
+        log.debug("Channel cache miss - fetching from database");
         List<MessageHistoryWrapperResponse.ChannelInfo> channels = getChannelInfo(userId);
         channelCache.put(userId, new CacheEntry<>(channels, CHANNEL_CACHE_TTL));
 
@@ -178,7 +182,7 @@ public class MessageHistoryService {
     }
 
     /**
-     * OPTIMIZATION 5: Efficient pagination with smart page link building
+     * OPTIMIZATION: Efficient pagination with smart page link building
      */
     private MessageHistoryPageResponse buildOptimizedPaginationResponse(
             List<MessageHistoryContactDTO> data,
@@ -211,7 +215,6 @@ public class MessageHistoryService {
 
     /**
      * OPTIMIZATION: Smart pagination - only show relevant page numbers
-     * Instead of showing all pages or too many, show: [1] ... [4][5][6][7][8] ... [100]
      */
     private List<PageLink> buildSmartPaginationLinks(int currentPage, int lastPage, String baseUrl) {
         List<PageLink> links = new ArrayList<>();

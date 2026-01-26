@@ -10,8 +10,8 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 /**
- * Optimized repository using single query with LEFT JOINs
- * Instead of multiple queries, we fetch everything in one go
+ * ULTRA-OPTIMIZED: Single query with COUNT(*) OVER() to get total count
+ * Eliminates separate count query entirely
  */
 @Repository
 @RequiredArgsConstructor
@@ -21,9 +21,10 @@ public class MessageHistoryRepository {
     private final JdbcTemplate jdbcTemplate;
 
     /**
-     * OPTIMIZED: Single query to get all message data with metadata
+     * SINGLE QUERY OPTIMIZATION: Get data + total count in one query
+     * Uses COUNT(*) OVER() window function to get total while paginating
      */
-    public List<Map<String, Object>> getLatestMessagesOptimized(
+    public MessageHistoryResult getLatestMessagesWithCount(
             Long userId,
             String search,
             String filter,
@@ -54,7 +55,9 @@ public class MessageHistoryRepository {
                 r.status AS report_status,
                 
                 COALESCE(unread_tbl.unread_count, 0) AS unread_count,
-                last_msg.last_chat_time
+                last_msg.last_chat_time,
+                
+                COUNT(*) OVER() AS total_count
                 
             FROM contacts_messages cm
             
@@ -132,9 +135,9 @@ public class MessageHistoryRepository {
         params.add(limit);
         params.add(offset);
 
-        log.debug("Executing optimized query with params: {}", params);
+        log.debug("Executing SINGLE optimized query with total count");
 
-        return jdbcTemplate.query(sql.toString(), params.toArray(), (rs, rowNum) -> {
+        List<Map<String, Object>> rows = jdbcTemplate.query(sql.toString(), params.toArray(), (rs, rowNum) -> {
             Map<String, Object> row = new LinkedHashMap<>();
 
             // Message data
@@ -164,89 +167,36 @@ public class MessageHistoryRepository {
             row.put("unread_count", rs.getInt("unread_count"));
             row.put("last_chat_time", rs.getObject("last_chat_time"));
 
+            // Total count from window function
+            row.put("total_count", rs.getLong("total_count"));
+
             return row;
         });
+
+        // Extract total count from first row (all rows have same total_count)
+        long totalCount = rows.isEmpty() ? 0L : ((Number) rows.get(0).get("total_count")).longValue();
+
+        return new MessageHistoryResult(rows, totalCount);
     }
 
     /**
-     * Count total contacts with same filters
+     * Result wrapper containing both data and total count
      */
-    public long countTotalContactsOptimized(
-            Long userId,
-            String search,
-            String filter,
-            LocalDateTime fromDate,
-            LocalDateTime toDate
-    ) {
-        StringBuilder sql = new StringBuilder("""
-            SELECT COUNT(DISTINCT cm.contact_id)
-            FROM contacts_messages cm
-            INNER JOIN chat_contacts cc ON cc.id = cm.contact_id
-        """);
+    public static class MessageHistoryResult {
+        private final List<Map<String, Object>> data;
+        private final long totalCount;
 
-        List<Object> params = new ArrayList<>();
-
-        // Add filter-specific joins
-        if ("unread".equalsIgnoreCase(filter)) {
-            sql.append("""
-                LEFT JOIN (
-                    SELECT contact_id, COUNT(*) AS unread_count
-                    FROM chats
-                    WHERE user_id = ?
-                      AND type = 'recieve'
-                      AND status = '0'
-                    GROUP BY contact_id
-                ) unread_tbl ON unread_tbl.contact_id = cc.id
-            """);
-            params.add(userId);
+        public MessageHistoryResult(List<Map<String, Object>> data, long totalCount) {
+            this.data = data;
+            this.totalCount = totalCount;
         }
 
-        if ("active".equalsIgnoreCase(filter)) {
-            sql.append("""
-                LEFT JOIN (
-                    SELECT contact_id, MAX(CAST(time AS UNSIGNED)) AS last_chat_time
-                    FROM chats
-                    WHERE user_id = ?
-                    GROUP BY contact_id
-                ) last_msg ON last_msg.contact_id = cc.id
-            """);
-            params.add(userId);
+        public List<Map<String, Object>> getData() {
+            return data;
         }
 
-        sql.append(" WHERE cm.user_id = ? ");
-        params.add(userId);
-
-        // Search filter
-        if (search != null && !search.isBlank()) {
-            sql.append(" AND (cc.mobile LIKE ? OR cc.name LIKE ?) ");
-            String searchPattern = "%" + search + "%";
-            params.add(searchPattern);
-            params.add(searchPattern);
+        public long getTotalCount() {
+            return totalCount;
         }
-
-        // Filter conditions
-        if ("unread".equalsIgnoreCase(filter)) {
-            sql.append(" AND unread_tbl.unread_count > 0 ");
-        }
-
-        if ("active".equalsIgnoreCase(filter)) {
-            long activeSince = (System.currentTimeMillis() / 1000) - 86400;
-            sql.append(" AND last_msg.last_chat_time >= ? ");
-            params.add(activeSince);
-        }
-
-        // Date filters
-        if (fromDate != null) {
-            sql.append(" AND cm.created_at >= ? ");
-            params.add(Timestamp.valueOf(fromDate));
-        }
-
-        if (toDate != null) {
-            sql.append(" AND cm.created_at <= ? ");
-            params.add(Timestamp.valueOf(toDate));
-        }
-
-        Long count = jdbcTemplate.queryForObject(sql.toString(), params.toArray(), Long.class);
-        return count != null ? count : 0L;
     }
 }
