@@ -135,6 +135,9 @@ public class MessageHistoryService {
      * OPTIMIZATION: Only build ChatInfo if data exists
      */
     private ChatInfo buildChatInfo(Map<String, Object> msg) {
+        if (msg.get("chat_id") == null || msg.get("chat_text") == null) {
+            return null;
+        }
 
         return ChatInfo.builder()
                 .text((String) msg.get("chat_text"))
