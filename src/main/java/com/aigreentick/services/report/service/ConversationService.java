@@ -3,37 +3,54 @@ package com.aigreentick.services.report.service;
 import com.aigreentick.services.report.repository.ConversationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * ULTRA-OPTIMIZED Conversation Service
+ * - Single query execution with embedded last_chat
+ * - Cached channel info with TTL
+ * - Complete pagination matching PHP format
+ * - Sub-second response time
+ */
 @Service
 @Slf4j
 @RequiredArgsConstructor
 public class ConversationService {
 
     private final ConversationRepository repository;
+    private final JdbcTemplate jdbcTemplate;
+
+    // Cache for channel info (rarely changes)
+    private static final Map<Integer, CacheEntry<List<Map<String, Object>>>> channelCache = new ConcurrentHashMap<>();
+    private static final long CHANNEL_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
     /**
-     * ULTRA-OPTIMIZED: Single query execution with embedded last_chat
-     * No need for separate fetchLastChats call
+     * MAIN API: Get inbox with complete pagination and channel info
+     * Matches PHP response structure exactly
      */
     public Map<String, Object> getInbox(
             Integer userId,
             String search,
             String filter,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
             int page,
             int size
     ) {
         long startTime = System.currentTimeMillis();
-        log.info("=== ConversationService getInbox START - User: {}, Page: {}, Filter: {} ===",
-                userId, page, filter);
+        log.info("=== ConversationService getInbox START - User: {}, Page: {}, Size: {}, Filter: {} ===",
+                userId, page, size, filter);
 
         int offset = page * size;
 
         // SINGLE QUERY: Get contacts with last_chat embedded + total count
         ConversationRepository.ConversationResult result =
-                repository.fetchContactsOptimized(userId, search, filter, offset, size);
+                repository.fetchContactsOptimized(userId, search, filter, fromDate, toDate, offset, size);
 
         List<Map<String, Object>> contacts = result.getData();
         long total = result.getTotalCount();
@@ -41,79 +58,249 @@ public class ConversationService {
         if (contacts.isEmpty()) {
             log.info("=== No contacts found - returning empty response in {}ms ===",
                     System.currentTimeMillis() - startTime);
-            return buildEmptyResponse(page, size);
+            return buildEmptyResponse(page, size, userId);
         }
 
-        // Process contacts - last_chat is already embedded, just add total_msg_count
-        for (Map<String, Object> contact : contacts) {
-            // total_msg_count = unread_count (matching the old behavior)
-            Object unread = contact.get("unread_count");
-            long totalMsgCount = unread == null ? 0L : ((Number) unread).longValue();
-            contact.put("total_msg_count", totalMsgCount);
+        // Get cached channel info
+        List<Map<String, Object>> channels = getCachedChannelInfo(userId);
 
-            // Remove total_count from individual records (it was only needed for pagination)
-            contact.remove("total_count");
-        }
-
-        // Build pagination metadata
-        Map<String, Object> users = new LinkedHashMap<>();
-        users.put("current_page", page + 1);
-        users.put("data", contacts);
-        users.put("per_page", size);
-        users.put("total", total);
-        users.put("last_page", (int) Math.ceil((double) total / size));
+        // Build complete pagination response matching PHP
+        Map<String, Object> usersData = buildPaginationResponse(contacts, page, size, total);
 
         long totalTime = System.currentTimeMillis() - startTime;
         log.info("=== ConversationService getInbox END - Total time: {}ms, Records: {}, Total: {} ===",
                 totalTime, contacts.size(), total);
 
         return Map.of(
-                "users", users,
-                "channel", List.of()
+                "users", usersData,
+                "channel", channels
         );
+    }
+
+    /**
+     * Build complete pagination response matching PHP format exactly
+     */
+    private Map<String, Object> buildPaginationResponse(
+            List<Map<String, Object>> data,
+            int page,
+            int size,
+            long total
+    ) {
+        int currentPage = page + 1; // Convert 0-based to 1-based
+        int lastPage = (int) Math.ceil((double) total / size);
+        int from = data.isEmpty() ? 0 : (page * size) + 1;
+        int to = data.isEmpty() ? 0 : (page * size) + data.size();
+
+        String baseUrl = "https://aigreentick.com/api/v1/sendMessage";
+
+        Map<String, Object> pagination = new LinkedHashMap<>();
+        pagination.put("current_page", currentPage);
+        pagination.put("data", data);
+        pagination.put("first_page_url", baseUrl + "?page=1");
+        pagination.put("from", from);
+        pagination.put("last_page", lastPage);
+        pagination.put("last_page_url", baseUrl + "?page=" + lastPage);
+        pagination.put("links", buildPaginationLinks(currentPage, lastPage, baseUrl));
+        pagination.put("next_page_url", currentPage < lastPage ? baseUrl + "?page=" + (currentPage + 1) : null);
+        pagination.put("path", baseUrl);
+        pagination.put("per_page", size);
+        pagination.put("prev_page_url", currentPage > 1 ? baseUrl + "?page=" + (currentPage - 1) : null);
+        pagination.put("to", to);
+        pagination.put("total", total);
+
+        return pagination;
+    }
+
+    /**
+     * Build pagination links matching Laravel's format
+     */
+    private List<Map<String, Object>> buildPaginationLinks(int currentPage, int lastPage, String baseUrl) {
+        List<Map<String, Object>> links = new ArrayList<>();
+
+        // Previous link
+        Map<String, Object> prevLink = new LinkedHashMap<>();
+        prevLink.put("url", currentPage > 1 ? baseUrl + "?page=" + (currentPage - 1) : null);
+        prevLink.put("label", "&laquo; Previous");
+        prevLink.put("active", false);
+        links.add(prevLink);
+
+        // Determine page range to show (max 10 pages)
+        int maxPagesToShow = 10;
+        int startPage = Math.max(1, currentPage - 4);
+        int endPage = Math.min(lastPage, startPage + maxPagesToShow - 1);
+
+        // Adjust start if we're near the end
+        if (endPage - startPage < maxPagesToShow - 1) {
+            startPage = Math.max(1, endPage - maxPagesToShow + 1);
+        }
+
+        // First page
+        if (startPage > 1) {
+            Map<String, Object> firstLink = new LinkedHashMap<>();
+            firstLink.put("url", baseUrl + "?page=1");
+            firstLink.put("label", "1");
+            firstLink.put("active", false);
+            links.add(firstLink);
+
+            if (startPage > 2) {
+                Map<String, Object> dots = new LinkedHashMap<>();
+                dots.put("url", null);
+                dots.put("label", "...");
+                dots.put("active", false);
+                links.add(dots);
+            }
+        }
+
+        // Page numbers
+        for (int i = startPage; i <= endPage; i++) {
+            Map<String, Object> pageLink = new LinkedHashMap<>();
+            pageLink.put("url", baseUrl + "?page=" + i);
+            pageLink.put("label", String.valueOf(i));
+            pageLink.put("active", i == currentPage);
+            links.add(pageLink);
+        }
+
+        // Last page
+        if (endPage < lastPage) {
+            if (endPage < lastPage - 1) {
+                Map<String, Object> dots = new LinkedHashMap<>();
+                dots.put("url", null);
+                dots.put("label", "...");
+                dots.put("active", false);
+                links.add(dots);
+            }
+
+            Map<String, Object> lastLink = new LinkedHashMap<>();
+            lastLink.put("url", baseUrl + "?page=" + lastPage);
+            lastLink.put("label", String.valueOf(lastPage));
+            lastLink.put("active", false);
+            links.add(lastLink);
+        }
+
+        // Next link
+        Map<String, Object> nextLink = new LinkedHashMap<>();
+        nextLink.put("url", currentPage < lastPage ? baseUrl + "?page=" + (currentPage + 1) : null);
+        nextLink.put("label", "Next &raquo;");
+        nextLink.put("active", false);
+        links.add(nextLink);
+
+        return links;
+    }
+
+    /**
+     * OPTIMIZATION: Cached channel info with TTL
+     */
+    private List<Map<String, Object>> getCachedChannelInfo(Integer userId) {
+        CacheEntry<List<Map<String, Object>>> cached = channelCache.get(userId);
+
+        if (cached != null && !cached.isExpired()) {
+            log.debug("Channel info retrieved from cache for user: {}", userId);
+            return cached.value;
+        }
+
+        // Cache miss or expired - fetch fresh data
+        log.debug("Channel cache miss - fetching from database");
+        List<Map<String, Object>> channels = fetchChannelInfo(userId);
+        channelCache.put(userId, new CacheEntry<>(channels, CHANNEL_CACHE_TTL));
+
+        return channels;
+    }
+
+    /**
+     * Fetch channel info from database
+     */
+    private List<Map<String, Object>> fetchChannelInfo(Integer userId) {
+        String sql = """
+            SELECT
+                id, user_id, created_by, whatsapp_no, whatsapp_no_id,
+                whatsapp_biz_id, parmenent_token, token, status, response,
+                created_at, updated_at, deleted_at
+            FROM whatsapp_accounts
+            WHERE user_id = ?
+        """;
+
+        return jdbcTemplate.query(sql, new Object[]{userId}, (rs, rowNum) -> {
+            Map<String, Object> channel = new LinkedHashMap<>();
+            channel.put("id", rs.getLong("id"));
+            channel.put("user_id", rs.getLong("user_id"));
+            channel.put("created_by", rs.getLong("created_by"));
+            channel.put("whatsapp_no", rs.getString("whatsapp_no"));
+            channel.put("whatsapp_no_id", rs.getString("whatsapp_no_id"));
+            channel.put("whatsapp_biz_id", rs.getString("whatsapp_biz_id"));
+            channel.put("parmenent_token", rs.getString("parmenent_token"));
+            channel.put("token", rs.getString("token"));
+            channel.put("status", rs.getString("status"));
+            channel.put("response", rs.getString("response"));
+            channel.put("created_at", formatTimestamp(rs.getTimestamp("created_at")));
+            channel.put("updated_at", formatTimestamp(rs.getTimestamp("updated_at")));
+            channel.put("deleted_at", formatTimestamp(rs.getTimestamp("deleted_at")));
+            return channel;
+        });
+    }
+
+    /**
+     * Format timestamp matching PHP format
+     */
+    private String formatTimestamp(java.sql.Timestamp timestamp) {
+        if (timestamp == null) {
+            return null;
+        }
+        return timestamp.toLocalDateTime().toString().replace("T", " ");
     }
 
     /**
      * Build empty response structure
      */
-    private Map<String, Object> buildEmptyResponse(int page, int size) {
+    private Map<String, Object> buildEmptyResponse(int page, int size, Integer userId) {
         Map<String, Object> users = new LinkedHashMap<>();
         users.put("current_page", page + 1);
         users.put("data", Collections.emptyList());
-        users.put("per_page", size);
-        users.put("total", 0L);
+        users.put("first_page_url", "https://aigreentick.com/api/v1/sendMessage?page=1");
+        users.put("from", null);
         users.put("last_page", 0);
+        users.put("last_page_url", "https://aigreentick.com/api/v1/sendMessage?page=0");
+        users.put("links", Collections.emptyList());
+        users.put("next_page_url", null);
+        users.put("path", "https://aigreentick.com/api/v1/sendMessage");
+        users.put("per_page", size);
+        users.put("prev_page_url", null);
+        users.put("to", null);
+        users.put("total", 0L);
 
         return Map.of(
                 "users", users,
-                "channel", List.of()
+                "channel", getCachedChannelInfo(userId)
         );
     }
 
     /**
-     * OPTIONAL: Get single contact with last chat
-     * Useful for individual contact retrieval
+     * Simple cache entry with TTL
      */
-    public Map<String, Object> getContactWithLastChat(Integer userId, Integer contactId) {
-        log.debug("Fetching single contact: {} for user: {}", contactId, userId);
+    private static class CacheEntry<T> {
+        final T value;
+        final long expiryTime;
 
-        // Reuse the optimized query with specific contact filter
-        // This could be further optimized with a WHERE contact_id = ? clause
-        ConversationRepository.ConversationResult result =
-                repository.fetchContactsOptimized(userId, null, null, 0, 1);
-
-        if (result.getData().isEmpty()) {
-            return Collections.emptyMap();
+        CacheEntry(T value, long ttlMillis) {
+            this.value = value;
+            this.expiryTime = System.currentTimeMillis() + ttlMillis;
         }
 
-        Map<String, Object> contact = result.getData().get(0);
+        boolean isExpired() {
+            return System.currentTimeMillis() > expiryTime;
+        }
+    }
 
-        // Add total_msg_count
-        Object unread = contact.get("unread_count");
-        long totalMsgCount = unread == null ? 0L : ((Number) unread).longValue();
-        contact.put("total_msg_count", totalMsgCount);
-        contact.remove("total_count");
+    /**
+     * Clear channel cache for a specific user (call when channel info changes)
+     */
+    public static void invalidateChannelCache(Integer userId) {
+        channelCache.remove(userId);
+    }
 
-        return contact;
+    /**
+     * Clear all channel cache (call on application refresh or manual trigger)
+     */
+    public static void clearAllCache() {
+        channelCache.clear();
     }
 }
