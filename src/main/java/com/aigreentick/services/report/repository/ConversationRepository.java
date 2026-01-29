@@ -21,10 +21,6 @@ public class ConversationRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /* =========================
-       ULTRA-OPTIMIZED: Single query with COUNT(*) OVER() to get total count
-       Similar to MessageHistoryRepository approach
-      ========================= */
     public ConversationResult fetchContactsOptimized(
             Integer userId,
             String search,
@@ -33,67 +29,64 @@ public class ConversationRepository {
             int limit
     ) {
         StringBuilder sql = new StringBuilder("""
-            SELECT
-                cc.id,
-                cc.user_id,
-                cc.name,
-                cc.mobile,
-                cc.country_id,
-                cc.email,
-                cc.status,
-                cc.time,
-                cc.created_at,
-                cc.updated_at,
-                cc.deleted_at,
-                lm.last_chat_time,
-                ut.unread_count,
-                lm.chat_id,
-                lm.chat_text,
-                lm.chat_type,
-                lm.chat_method,
-                lm.chat_status,
-                lm.chat_created_at,
-                COUNT(*) OVER() AS total_count
-            FROM chat_contacts cc
-            
-            /* Last message with full chat details using CAST for performance */
-            LEFT JOIN (
-                SELECT
-                    c.contact_id,
-                    CAST(c.time AS UNSIGNED) AS last_chat_time,
-                    c.id AS chat_id,
-                    c.text AS chat_text,
-                    c.type AS chat_type,
-                    c.method AS chat_method,
-                    c.status AS chat_status,
-                    c.created_at AS chat_created_at
-                FROM chats c
-                INNER JOIN (
-                    SELECT contact_id, MAX(CAST(time AS UNSIGNED)) AS max_time
-                    FROM chats
-                    GROUP BY contact_id
-                ) max_chats ON c.contact_id = max_chats.contact_id 
-                    AND CAST(c.time AS UNSIGNED) = max_chats.max_time
-            ) lm ON lm.contact_id = cc.id
-            
-            /* Unread count */
-            LEFT JOIN (
-                SELECT
-                    contact_id,
-                    COUNT(*) AS unread_count
-                FROM chats
-                WHERE LOWER(TRIM(type)) = 'recieve'
-                  AND TRIM(status) = '0'
-                GROUP BY contact_id
-            ) ut ON ut.contact_id = cc.id
-            
-            WHERE cc.user_id = ?
-              AND lm.last_chat_time IS NOT NULL
-        """);
+        SELECT
+            cc.id,
+            cc.user_id,
+            cc.name,
+            cc.mobile,
+            cc.country_id,
+            cc.email,
+            cc.status,
+            cc.time,
+            cc.created_at,
+            cc.updated_at,
+            cc.deleted_at,
+
+            c.id         AS chat_id,
+            c.text       AS chat_text,
+            c.type       AS chat_type,
+            c.method     AS chat_method,
+            c.status     AS chat_status,
+            c.created_at AS chat_created_at,
+
+            COALESCE(ut.unread_count, 0) AS unread_count,
+
+            COUNT(*) OVER() AS total_count
+
+        FROM chat_contacts cc
+
+        /* 🔥 last chat per contact using MAX(id) */
+        INNER JOIN (
+            SELECT contact_id, MAX(id) AS last_chat_id
+            FROM chats
+            WHERE user_id = ?
+            GROUP BY contact_id
+        ) lc ON lc.contact_id = cc.id
+
+        INNER JOIN chats c
+            ON c.id = lc.last_chat_id
+           AND c.user_id = ?
+
+        /* ✅ unread count per contact */
+        LEFT JOIN (
+            SELECT contact_id, COUNT(*) AS unread_count
+            FROM chats
+            WHERE user_id = ?
+              AND type = 'recieve'
+              AND status = '0'
+            GROUP BY contact_id
+        ) ut ON ut.contact_id = cc.id
+
+        WHERE cc.user_id = ?
+    """);
 
         List<Object> params = new ArrayList<>();
-        params.add(userId);
+        params.add(userId); // subquery MAX(id)
+        params.add(userId); // chats join
+        params.add(userId); // unread subquery
+        params.add(userId); // main where
 
+        /* 🔍 Search */
         if (search != null && !search.isBlank()) {
             sql.append(" AND (cc.name LIKE ? OR cc.mobile LIKE ?) ");
             String searchPattern = "%" + search + "%";
@@ -101,22 +94,23 @@ public class ConversationRepository {
             params.add(searchPattern);
         }
 
+        /* 📌 Filters */
         if ("unread".equalsIgnoreCase(filter)) {
-            sql.append(" AND ut.unread_count IS NOT NULL ");
+            sql.append(" AND ut.unread_count > 0 ");
         }
 
         if ("active".equalsIgnoreCase(filter)) {
-            long activeSince = (System.currentTimeMillis() / 1000) - (24 * 60 * 60);
-            sql.append(" AND lm.last_chat_time >= ? ");
-            params.add(activeSince);
+            sql.append(" AND c.created_at >= ? ");
+            params.add(java.sql.Timestamp.valueOf(
+                    java.time.LocalDateTime.now().minusHours(24)
+            ));
         }
 
-        sql.append(" ORDER BY lm.last_chat_time DESC ");
-        sql.append(" LIMIT ? OFFSET ? ");
+        sql.append(" ORDER BY c.id DESC LIMIT ? OFFSET ? ");
         params.add(limit);
         params.add(offset);
 
-        log.debug("Executing OPTIMIZED conversation query with total count");
+        log.debug("Executing optimized ConversationRepository query");
 
         List<Map<String, Object>> rows = jdbcTemplate.query(
                 sql.toString(),
@@ -124,7 +118,7 @@ public class ConversationRepository {
                 (rs, rowNum) -> {
                     Map<String, Object> row = new LinkedHashMap<>();
 
-                    // Contact data
+                    // Contact fields
                     row.put("id", rs.getInt("id"));
                     row.put("user_id", rs.getInt("user_id"));
                     row.put("name", rs.getString("name"));
@@ -143,11 +137,7 @@ public class ConversationRepository {
                             ? rs.getTimestamp("deleted_at").toLocalDateTime().toString()
                             : null);
 
-                    // Last chat metadata
-                    row.put("last_chat_time", rs.getObject("last_chat_time"));
-                    row.put("unread_count", rs.getObject("unread_count"));
-
-                    // Last chat details (embedded as nested map)
+                    // Last chat (nested)
                     Map<String, Object> lastChat = new LinkedHashMap<>();
                     lastChat.put("id", rs.getObject("chat_id"));
                     lastChat.put("text", rs.getString("chat_text"));
@@ -160,18 +150,21 @@ public class ConversationRepository {
 
                     row.put("last_chat", lastChat);
 
-                    // Total count from window function
+                    // Metadata
+                    row.put("unread_count", rs.getInt("unread_count"));
                     row.put("total_count", rs.getLong("total_count"));
 
                     return row;
                 }
         );
 
-        // Extract total count from first row (all rows have same total_count)
-        long totalCount = rows.isEmpty() ? 0L : ((Number) rows.get(0).get("total_count")).longValue();
+        long totalCount = rows.isEmpty()
+                ? 0L
+                : ((Number) rows.get(0).get("total_count")).longValue();
 
         return new ConversationResult(rows, totalCount);
     }
+
 
     /* =========================
        FALLBACK: Keep old methods for backward compatibility
