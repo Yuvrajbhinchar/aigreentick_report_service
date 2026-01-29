@@ -15,6 +15,20 @@ public class ConversationController {
 
     private final ConversationService service;
 
+    /**
+     * TIER 1 OPTIMIZED ENDPOINT
+     * Matches PHP response structure exactly:
+     * {
+     *   "users": {
+     *     "current_page": 1,
+     *     "data": [...],
+     *     "per_page": 15,
+     *     "total": 100,
+     *     "last_page": 7
+     *   },
+     *   "channel": []
+     * }
+     */
     @GetMapping("/inbox")
     public Map<String, Object> inbox(
             @RequestParam Integer userId,
@@ -23,7 +37,9 @@ public class ConversationController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "15") int size
     ) {
+        log.info("=== /inbox called - userId: {}, page: {}, size: {}, search: {}, filter: {} ===",
+                userId, page, size, search, filter);
+
         return service.getInbox(userId, search, filter, page, size);
     }
 }
-

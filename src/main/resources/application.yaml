@@ -23,3 +23,6 @@ spring:
     idle-timeout: 30000
     max-lifetime: 600000
     connection-timeout: 30000
+
+  jackson:
+    property-naming-strategy: SNAKE_CASE
