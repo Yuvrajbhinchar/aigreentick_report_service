@@ -17,12 +17,71 @@ spring:
     show-sql: false
     open-in-view: false
 
+  # OPTIMIZED: HikariCP Connection Pool Settings
   hikari:
-    minimum-idle: 5
-    maximum-pool-size: 20
-    idle-timeout: 30000
-    max-lifetime: 600000
-    connection-timeout: 30000
+    # Pool Size Configuration
+    minimum-idle: 10              # Increased from 5 (maintains ready connections)
+    maximum-pool-size: 30         # Increased from 20 (allows more concurrent requests)
+
+    # Timeout Configuration
+    connection-timeout: 10000     # 10 seconds (fail fast if pool exhausted)
+    idle-timeout: 300000          # 5 minutes (close idle connections)
+    max-lifetime: 600000          # 10 minutes (connection refresh)
+
+    # Connection Test Configuration
+    validation-timeout: 5000      # 5 seconds (test connection validity)
+    leak-detection-threshold: 30000  # 30 seconds (detect connection leaks)
+
+    # Performance Optimization
+    auto-commit: false            # Disable auto-commit for better performance
+
+    # Pool Behavior
+    register-mbeans: true         # Enable JMX monitoring
+
+    # Connection Properties
+    data-source-properties:
+      cachePrepStmts: true
+      prepStmtCacheSize: 250
+      prepStmtCacheSqlLimit: 2048
+      useServerPrepStmts: true
+      useLocalSessionState: true
+      rewriteBatchedStatements: true
+      cacheResultSetMetadata: true
+      cacheServerConfiguration: true
+      elideSetAutoCommits: true
+      maintainTimeStats: false
 
   jackson:
     property-naming-strategy: SNAKE_CASE
+
+# Logging Configuration for Performance Monitoring
+logging:
+  level:
+    root: INFO
+    com.aigreentick.services.report: INFO
+    com.aigreentick.services.report.repository.ConversationRepository: DEBUG
+    com.aigreentick.services.report.repository.MessageHistoryRepository: DEBUG
+    com.aigreentick.services.report.service.ConversationService: INFO
+    com.aigreentick.services.report.service.MessageHistoryService: INFO
+
+    # HikariCP Monitoring (set to DEBUG to see pool details)
+    com.zaxxer.hikari: WARN
+    com.zaxxer.hikari.pool.HikariPool: WARN
+
+    # SQL Query Logging (disable in production)
+    org.springframework.jdbc.core.JdbcTemplate: DEBUG
+    org.springframework.jdbc.core.StatementCreatorUtils: TRACE
+
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+# Management Endpoints for Monitoring
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,hikaricp
+  metrics:
+    export:
+      simple:
+        enabled: true

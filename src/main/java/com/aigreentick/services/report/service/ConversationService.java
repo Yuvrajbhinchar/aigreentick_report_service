@@ -1,6 +1,7 @@
 package com.aigreentick.services.report.service;
 
 import com.aigreentick.services.report.repository.ConversationRepository;
+import com.zaxxer.hikari.HikariDataSource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,11 +12,11 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * ULTRA-OPTIMIZED Conversation Service
- * - Single query execution with embedded last_chat
+ * ULTRA-OPTIMIZED V2:
+ * - Separate count query (no window function blocking)
+ * - Connection pool monitoring
  * - Cached channel info with TTL
  * - Complete pagination matching PHP format
- * - Sub-second response time
  */
 @Service
 @Slf4j
@@ -24,6 +25,7 @@ public class ConversationService {
 
     private final ConversationRepository repository;
     private final JdbcTemplate jdbcTemplate;
+    private final HikariDataSource dataSource;
 
     // Cache for channel info (rarely changes)
     private static final Map<Integer, CacheEntry<List<Map<String, Object>>>> channelCache = new ConcurrentHashMap<>();
@@ -43,38 +45,53 @@ public class ConversationService {
             int size
     ) {
         long startTime = System.currentTimeMillis();
+
+        // Log connection pool status BEFORE query
+        logConnectionPoolStatus("INBOX_START", userId);
+
         log.info("=== ConversationService getInbox START - User: {}, Page: {}, Size: {}, Filter: {} ===",
                 userId, page, size, filter);
 
         int offset = page * size;
 
-        // SINGLE QUERY: Get contacts with last_chat embedded + total count
-        ConversationRepository.ConversationResult result =
-                repository.fetchContactsOptimized(userId, search, filter, fromDate, toDate, offset, size);
+        try {
+            // OPTIMIZED: Separate data + count queries (no window function)
+            ConversationRepository.ConversationResult result =
+                    repository.fetchContactsOptimized(userId, search, filter, fromDate, toDate, offset, size);
 
-        List<Map<String, Object>> contacts = result.getData();
-        long total = result.getTotalCount();
+            List<Map<String, Object>> contacts = result.getData();
+            long total = result.getTotalCount();
 
-        if (contacts.isEmpty()) {
-            log.info("=== No contacts found - returning empty response in {}ms ===",
-                    System.currentTimeMillis() - startTime);
-            return buildEmptyResponse(page, size, userId);
+            if (contacts.isEmpty()) {
+                log.info("=== No contacts found - returning empty response in {}ms ===",
+                        System.currentTimeMillis() - startTime);
+                return buildEmptyResponse(page, size, userId);
+            }
+
+            // Get cached channel info (no database call if cached)
+            List<Map<String, Object>> channels = getCachedChannelInfo(userId);
+
+            // Build complete pagination response matching PHP
+            Map<String, Object> usersData = buildPaginationResponse(contacts, page, size, total);
+
+            long totalTime = System.currentTimeMillis() - startTime;
+
+            // Log connection pool status AFTER query
+            logConnectionPoolStatus("INBOX_END", userId);
+
+            log.info("=== ConversationService getInbox END - Total time: {}ms, Records: {}, Total: {} ===",
+                    totalTime, contacts.size(), total);
+
+            return Map.of(
+                    "users", usersData,
+                    "channel", channels
+            );
+
+        } catch (Exception e) {
+            log.error("Error in getInbox for user {}: {}", userId, e.getMessage(), e);
+            logConnectionPoolStatus("INBOX_ERROR", userId);
+            throw e;
         }
-
-        // Get cached channel info
-        List<Map<String, Object>> channels = getCachedChannelInfo(userId);
-
-        // Build complete pagination response matching PHP
-        Map<String, Object> usersData = buildPaginationResponse(contacts, page, size, total);
-
-        long totalTime = System.currentTimeMillis() - startTime;
-        log.info("=== ConversationService getInbox END - Total time: {}ms, Records: {}, Total: {} ===",
-                totalTime, contacts.size(), total);
-
-        return Map.of(
-                "users", usersData,
-                "channel", channels
-        );
     }
 
     /**
@@ -271,6 +288,29 @@ public class ConversationService {
                 "users", users,
                 "channel", getCachedChannelInfo(userId)
         );
+    }
+
+    /**
+     * CONNECTION POOL MONITORING: Log pool status for debugging
+     */
+    private void logConnectionPoolStatus(String stage, Integer userId) {
+        try {
+            int active = dataSource.getHikariPoolMXBean().getActiveConnections();
+            int idle = dataSource.getHikariPoolMXBean().getIdleConnections();
+            int waiting = dataSource.getHikariPoolMXBean().getThreadsAwaitingConnection();
+            int total = dataSource.getHikariPoolMXBean().getTotalConnections();
+
+            if (waiting > 0 || active > 15) {
+                log.warn("🔵 CONVERSATION {} [User: {}] - Active: {}/{}, Idle: {}, Waiting: {} ⚠️",
+                        stage, userId, active, total, idle, waiting);
+            } else {
+                log.debug("🔵 CONVERSATION {} [User: {}] - Active: {}/{}, Idle: {}, Waiting: {}",
+                        stage, userId, active, total, idle, waiting);
+            }
+        } catch (Exception e) {
+            // Ignore if monitoring fails
+            log.trace("Could not read connection pool metrics: {}", e.getMessage());
+        }
     }
 
     /**
